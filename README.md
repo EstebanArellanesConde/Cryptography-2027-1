@@ -8,7 +8,7 @@ Repository for Cryptography Coursework 2027-1 (Group 4, Team 6).
 - Esteban Arellanes Conde
 - María Fernanda Cervantes Valencia
 - Axel Gael Méndez Galicia
-- Alberto Cristian Rea
+- Cristian Rea Alberto 
 
 **Professor:** Dra. Rocío Alejandra Aldeco Pérez
 **Project:** Secure Digital Document Vault
