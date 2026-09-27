@@ -4,6 +4,7 @@ Repository for Cryptography Coursework 2027-1
 
 ## 1. System Overview
 
+```bash
 README.md
 │
 ├── D1 - Architecture & Threat Model
@@ -25,6 +26,7 @@ README.md
     ├── Asymmetric Cryptography
     ├── API Framework
     └── Randomness Requirements
+```
 
 ### 1.1 What problem does your vault solve?
 
