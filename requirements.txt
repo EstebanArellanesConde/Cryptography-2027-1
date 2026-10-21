@@ -1,0 +1,4 @@
+cryptography>=44.0.0,<47.0.0
+pytest>=8.0.0,<10.0.0
+pycryptodome
+hashlib
