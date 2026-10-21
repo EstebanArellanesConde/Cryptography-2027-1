@@ -49,7 +49,7 @@ pytest -q
 ## Example
 
 ```python
-from secure_vault import encrypt_file, decrypt_file
+from encryption.aes_gcm_core import encrypt_file, decrypt_file
 
 key = encrypt_file("input.pdf", "input.pdf.svlt")
 # Save `key` using your approved secure key-management mechanism.
