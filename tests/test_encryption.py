@@ -3,7 +3,7 @@ import os
 import json
 import base64
 from cryptography.exceptions import InvalidTag
-from encryption.aes_gcm_core import encrypt_file, decrypt_file, encrypt_bytes
+from encryption.chacha20_core import encrypt_file, decrypt_file, encrypt_bytes
 
 def test_encrypt_decrypt_returns_identical(tmp_path):
     # Se definen rutas temporales para los archivos de entrada, salida y el archivo recuperado.
