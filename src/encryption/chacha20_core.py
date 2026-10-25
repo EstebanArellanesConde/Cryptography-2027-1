@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
@@ -13,7 +13,7 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     # 2. Se crea un diccionario con los metadatos que se desean ocultar (nombre, fecha y tamaño).
     metadata = {
         "filename": filename,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "plaintext_size": len(plaintext)
     }
     # Se convierten los metadatos a formato JSON y luego a bytes para poder encriptarlos.

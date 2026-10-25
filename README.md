@@ -318,3 +318,8 @@ key = os.urandom(32)  # 256-bit key from a CSPRNG
 Random values required by the cryptographic design, such as salts, nonces, initialization values, or key material, must instead be generated using a cryptographically secure randomness mechanism provided by the selected cryptographic platform/library.
 
 The random-number generation mechanism must therefore be treated as a security requirement and documented as part of the final cryptographic implementation.
+
+
+## D3 — Hybrid multi-recipient encryption
+
+See [`README_D3.md`](README_D3.md) for the D3 design, security decisions, usage example, threat model and test coverage.
