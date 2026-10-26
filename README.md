@@ -318,3 +318,78 @@ key = os.urandom(32)  # 256-bit key from a CSPRNG
 Random values required by the cryptographic design, such as salts, nonces, initialization values, or key material, must instead be generated using a cryptographically secure randomness mechanism provided by the selected cryptographic platform/library.
 
 The random-number generation mechanism must therefore be treated as a security requirement and documented as part of the final cryptographic implementation.
+
+
+
+---
+
+# D2 — Secure Symmetric Encryption Module
+
+D2 implements authenticated symmetric encryption for a single file owner using ChaCha20-Poly1305.
+
+The module provides confidentiality, integrity, and tamper detection through authenticated encryption (AEAD).
+
+The implementation generates a fresh 256-bit symmetric key and a 96-bit nonce for each encryption operation.
+
+The encrypted container includes the nonce, ciphertext, authentication tag, and authenticated metadata.
+
+**Implementation:** `src/encryption/chacha20_core.py`
+
+**Tests:** `tests/test_encryption.py`
+
+**Documentation:** [README_D2.md](README_D2.md)
+
+---
+
+# D3 — Hybrid Encryption
+
+D3 extends the Secure Digital Document Vault to support secure file sharing with multiple authorized recipients using hybrid encryption.
+
+The file is encrypted only once using ChaCha20-Poly1305. The symmetric file key is then encrypted separately for each recipient using RSA-OAEP with SHA-256.
+
+Each recipient uses their RSA private key to recover the symmetric file key and decrypt the file.
+
+## Main Features
+
+- Support for at least two authorized recipients.
+- Individual RSA-OAEP encryption of the symmetric file key.
+- Deterministic recipient identification using SHA-256 public-key fingerprints.
+- JSON container containing the recipient list, encrypted keys, nonce, ciphertext, and authentication tag.
+- AAD protection for the public header, recipient list, and algorithm identifiers.
+- Rejection of unauthorized recipients and modified authenticated data.
+
+## Required Security Tests
+
+The implementation includes five required tests:
+
+1. Two authorized recipients can decrypt the same file.
+2. An unauthorized recipient cannot decrypt the file.
+3. Tampering with the recipient list causes authentication failure.
+4. Using the wrong private key fails.
+5. Removing a recipient entry breaks access.
+
+## Implementation and Documentation
+
+**Implementation:** `src/encryption/hybrid_core.py`
+
+**Tests:** `tests/test_hybrid.py`
+
+**Documentation:** [README_D3.md](README_D3.md)
+
+## Running the Tests
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Run all D2 and D3 tests:
+
+```bash
+python -m pytest tests/ -v
+```
+
+The project currently includes five D2 tests and five D3 tests.
+
+D3 provides confidentiality and tamper detection for authorized recipients. Trusted public-key distribution and independent sender authentication are outside the scope of this deliverable.
