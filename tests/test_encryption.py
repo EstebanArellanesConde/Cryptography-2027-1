@@ -3,7 +3,16 @@ import os
 import json
 import base64
 from cryptography.exceptions import InvalidTag
-from encryption.chacha20_core import encrypt_file, decrypt_file, encrypt_bytes
+from encryption.chacha20_core import (
+    encrypt_file,
+    decrypt_file,
+    encrypt_bytes,
+    decrypt_bytes,
+    MAX_FILE_SIZE,
+    VaultSecurityError,
+    IntegrityError,
+    InvalidContainerError,
+)
 
 def test_encrypt_decrypt_returns_identical(tmp_path):
     # Se definen rutas temporales para los archivos de entrada, salida y el archivo recuperado.
@@ -119,3 +128,77 @@ def test_multiple_encryptions_produce_different_outputs():
     # Se verifica que, como resultado de tener llaves y nonces diferentes, 
     # el texto cifrado resultante sea completamente diferente para el mismo archivo.
     assert c1["ciphertext"] != c2["ciphertext"]
+
+def test_modified_tag_fails(tmp_path):
+    # Prueba manipulación del tag Poly1305
+    input_file = tmp_path / "input.txt"
+    output_file = tmp_path / "output.svlt"
+    recovered_file = tmp_path / "recovered.txt"
+    
+    input_file.write_bytes(b"Datos")
+    key = encrypt_file(str(input_file), str(output_file))
+    
+    container = json.loads(output_file.read_text())
+    raw_tag = bytearray(base64.b64decode(container["tag"]))
+    raw_tag[0] ^= 0x01
+    container["tag"] = base64.b64encode(raw_tag).decode('utf-8')
+    output_file.write_text(json.dumps(container))
+    
+    with pytest.raises(InvalidTag):
+        decrypt_file(str(output_file), str(recovered_file), key)
+    assert not recovered_file.exists()
+
+def test_modified_nonce_fails(tmp_path):
+    # Prueba manipulación del nonce
+    input_file = tmp_path / "input.txt"
+    output_file = tmp_path / "output.svlt"
+    recovered_file = tmp_path / "recovered.txt"
+    
+    input_file.write_bytes(b"Datos")
+    key = encrypt_file(str(input_file), str(output_file))
+    
+    container = json.loads(output_file.read_text())
+    raw_nonce = bytearray(base64.b64decode(container["nonce"]))
+    raw_nonce[0] ^= 0x01
+    container["nonce"] = base64.b64encode(raw_nonce).decode('utf-8')
+    output_file.write_text(json.dumps(container))
+    
+    with pytest.raises(InvalidTag):
+        decrypt_file(str(output_file), str(recovered_file), key)
+    assert not recovered_file.exists()
+
+def test_metadata_confidentiality():
+    # Verifica que el nombre original y metadatos sensibles no sean visibles en claro en el contenedor
+    data = b"Confidencial"
+    sensitive_filename = "nomina_secreta_2026.xlsx"
+    container_bytes, key = encrypt_bytes(data, sensitive_filename)
+    container_text = container_bytes.decode('utf-8')
+    
+    assert sensitive_filename not in container_text
+    assert "plaintext_size" not in container_text
+
+def test_malformed_json_fails(tmp_path):
+    # Verifica el manejo fail-closed ante JSON malformado
+    output_file = tmp_path / "bad.svlt"
+    recovered_file = tmp_path / "recovered.txt"
+    output_file.write_text("{ esto no es un json valido }")
+    
+    with pytest.raises(InvalidContainerError):
+        decrypt_file(str(output_file), str(recovered_file), os.urandom(32))
+
+def test_file_size_limit_rejection():
+    # Verifica el rechazo de archivos que exceden 256 MiB
+    class TooLarge(bytes):
+        def __len__(self):
+            return MAX_FILE_SIZE + 1
+            
+    with pytest.raises(ValueError, match="exceeds maximum limit of 256 MiB"):
+        encrypt_bytes(TooLarge(), "big.bin")
+
+def test_decrypt_bytes_roundtrip():
+    # Verifica el ciclo completo en memoria de encrypt_bytes y decrypt_bytes
+    data = b"Documento en memoria sin acceso a disco"
+    container_bytes, key = encrypt_bytes(data, "mem.txt")
+    recovered, meta = decrypt_bytes(container_bytes, key)
+    assert recovered == data
+    assert meta["filename"] == "mem.txt"

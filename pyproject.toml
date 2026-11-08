@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "secure-vault-d2"
-version = "0.1.0"
-description = "D2 authenticated file encryption module using ChaCha20-Poly1305"
+name = "secure-digital-vault"
+version = "0.3.0"
+description = "Secure Digital Document Vault - ChaCha20-Poly1305 AEAD and Multi-Recipient RSA-OAEP Hybrid Encryption"
 requires-python = ">=3.10"
 dependencies = ["cryptography>=44.0.0,<47.0.0"]
 
