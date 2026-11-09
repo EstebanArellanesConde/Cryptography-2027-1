@@ -1,173 +1,95 @@
+# D3 — Hybrid Encryption (ECIES / P-256)
 
-# D3 — Hybrid Encryption
+## 1. Goal
 
-## 1. Overview
+Extend the D2 **Secure Digital Document Vault** to allow multiple authorized recipients to decrypt the same file. The file is encrypted **once** with ChaCha20-Poly1305, and its fresh symmetric key is protected **separately for each recipient** with ECIES-style elliptic-curve encryption.
 
-This module extends the D2 Secure Symmetric Encryption Module to support secure file sharing with multiple authorized recipients using hybrid encryption.
+## 2. Hybrid design
 
-The file is encrypted only once using ChaCha20-Poly1305. The symmetric file key is then encrypted separately for each recipient using RSA-OAEP with SHA-256.
+- **Why hybrid encryption?** Symmetric encryption efficiently protects the whole file, while public-key cryptography protects only the short file key.
+- **Why is symmetric encryption still needed?** Encrypting a large file using public-key operations is inefficient. D2's ChaCha20-Poly1305 continues to provide confidentiality, integrity, and tamper detection.
+- **Why wrap for each recipient?** Alice and Bob have independent key pairs and can recover the same file key without sharing private keys.
 
-Only recipients with the corresponding private keys can recover the symmetric key and decrypt the file.
+### Algorithms
 
-## 2. Hybrid Design Explanation
+| Purpose | Algorithm |
+| --- | --- |
+| File encryption and authentication (D2) | ChaCha20-Poly1305 (256-bit key, 96-bit nonce, 128-bit tag) |
+| Recipient key pair | ECC secp256r1 (NIST P-256) |
+| Shared secret per recipient | ECDH with a new ephemeral P-256 key |
+| Key derivation | HKDF-SHA256 (random 16-byte salt, 32-byte output, fixed domain-separated context and `key_id`) |
+| File-key wrap | AES-256-GCM (new random 12-byte nonce) |
+| Recipient ID | SHA-256 of DER SubjectPublicKeyInfo of their public key |
 
-### Why is hybrid encryption used?
+**ECIES** is a *scheme*, not a particular curve. Our implementation uses the ECIES-style sequence **ephemeral ECDH → HKDF → AES-GCM**, using the existing `cryptography` library. The protected 32-byte file key is never sent in plaintext.
 
-Hybrid encryption combines symmetric and asymmetric cryptography to achieve secure and efficient file sharing.
+The per-recipient `encrypted_key` is Base64 of the binary concatenation:
 
-Symmetric encryption protects the file contents, while asymmetric encryption protects the symmetric key for each authorized recipient.
+`ephemeral_public_key (65 B) || HKDF_salt (16 B) || AESGCM_nonce (12 B) || AESGCM(file_key) (48 B)`
 
-This avoids encrypting large files directly with public-key cryptography.
+The AES-GCM AAD for the file-key wrap is the recipient's `key_id`. The HKDF context contains a domain separator and this same ID.
 
-### Why is symmetric encryption still needed?
+## 3. Key identification and security decisions
 
-Symmetric encryption is efficient for encrypting file contents of different sizes.
+A deterministic SHA-256 fingerprint of the recipient's public key is stored as `key_id`. During decryption, the recipient derives their public key from their private key, calculates the fingerprint, and selects **exactly one** matching entry. Duplicate IDs are rejected.
 
-This module uses ChaCha20-Poly1305, an authenticated encryption algorithm that provides confidentiality, integrity, and tamper detection.
+Public-key fingerprints identify a key, **not a verified human identity**. The application assumes authentic public keys have been exchanged before encrypting; full certificate/PKI validation is outside this D3 scope.
 
-The file is encrypted only once, regardless of the number of authorized recipients.
+If a wrong public key was used, the intended recipient cannot recover the file key. If a different private key is used, AES-GCM verification of the wrapped key fails. If an attacker edits, adds, removes or swaps recipient entries, the file-level **AAD** changes; decryption is rejected by ChaCha20-Poly1305, even by other authorized recipients, unless they re-encrypt/re-authenticate the container legitimately.
 
-### Why is per-recipient key encryption required?
-
-Each recipient has a different RSA public and private key pair.
-
-The same symmetric file key is encrypted separately with each recipient's public key.
-
-This allows multiple users to access the same encrypted file without sharing their private keys.
-
-## 3. Cryptographic Algorithms
-
-The implementation uses:
-
-- **ChaCha20-Poly1305:** Encrypts and authenticates the file.
-- **RSA-OAEP with SHA-256:** Encrypts the symmetric file key for each recipient.
-- **SHA-256:** Generates deterministic public-key identifiers.
-- **AAD:** Authenticates the public header and complete recipient list.
-
-The symmetric key is 256 bits, the nonce is 96 bits, and the authentication tag is 128 bits.
-
-RSA keys are generated with a size of 3072 bits.
-
-## 4. Key Identification Mechanism
-
-Each recipient is identified using a SHA-256 fingerprint of their RSA public key.
-
-The public key is serialized using DER encoding with the SubjectPublicKeyInfo format before calculating its fingerprint.
-
-When decrypting, the system derives the identifier from the recipient's private key and searches for the matching entry in the container.
-
-Duplicate identifiers are rejected to avoid ambiguity.
-
-A public-key fingerprint identifies a cryptographic key but does not independently prove the real-world identity of its owner. Public keys must therefore be obtained and verified through a trusted mechanism.
-
-## 5. Updated Container Format
-
-The encrypted file is represented as a JSON container with the following structure:
+## 4. Container format (version 3.0)
 
 ```json
 {
   "header": {
     "format": "SecureVault",
-    "version": "2.0",
+    "version": "3.0",
     "algorithm": "ChaCha20-Poly1305",
-    "key_encryption": "RSA-OAEP-SHA256"
+    "key_encryption": "ECIES-P256-ECDH-HKDF-SHA256-AESGCM"
   },
   "recipients": [
-    {
-      "key_id": "SHA256_PUBLIC_KEY_FINGERPRINT",
-      "encrypted_key": "BASE64_ENCRYPTED_KEY"
-    },
-    {
-      "key_id": "SHA256_PUBLIC_KEY_FINGERPRINT",
-      "encrypted_key": "BASE64_ENCRYPTED_KEY"
-    }
+    {"key_id": "<Alice SHA256 fingerprint>", "encrypted_key": "<Base64 ECIES wrapping>"},
+    {"key_id": "<Bob SHA256 fingerprint>", "encrypted_key": "<Base64 ECIES wrapping>"}
   ],
-  "nonce": "BASE64_NONCE",
-  "ciphertext": "BASE64_CIPHERTEXT",
-  "tag": "BASE64_AUTHENTICATION_TAG"
+  "nonce": "<Base64>",
+  "ciphertext": "<Base64>",
+  "tag": "<Base64>"
 }
 ```
 
-The recipient list stores a separate encrypted copy of the same symmetric file key for every authorized recipient.
+Private metadata (`filename`, UTC `timestamp`, `plaintext_size`) is placed *inside* the encrypted payload. The public `header` and the complete `recipients` list (including key IDs, encrypted keys and algorithm identifiers) form the canonical JSON AAD (sorted keys, compact separators). No private keys are serialized in the container.
 
-The original filename, UTC timestamp, and plaintext size are included inside the encrypted payload to preserve their confidentiality.
+## 5. Encrypt/decrypt flow
 
-## 6. Metadata and AAD Integration
+1. Generate a random 32-byte symmetric key and a random 12-byte file nonce.
+2. Package confidential metadata with plaintext; generate one ChaCha20-Poly1305 ciphertext for the file.
+3. For each recipient, generate an ephemeral P-256 key, calculate ECDH, use HKDF to derive an AES-256-GCM wrapping key, and encrypt the symmetric file key.
+4. Store the wrapped keys and identifiers in the authenticated JSON container.
+5. On decryption, find the recipient's entry, recover the symmetric key using their EC private key, reconstruct AAD and verify/decrypt the ChaCha20-Poly1305 ciphertext.
 
-The Additional Authenticated Data (AAD) includes:
+## 6. Running the tests
 
-- The public header.
-- The complete recipient list.
-- Public-key identifiers.
-- Encrypted symmetric keys.
-- Cryptographic algorithm identifiers.
+From the repository root:
 
-The AAD is constructed using a consistent JSON serialization with sorted keys.
-
-If an attacker modifies the authenticated recipient list or header, the integrity verification fails and the file cannot be decrypted.
-
-## 7. Security Decisions
-
-### How do recipients identify their key?
-
-Each recipient calculates the SHA-256 fingerprint of their RSA public key and searches for the corresponding key identifier in the container.
-
-The matching encrypted symmetric key is recovered using the recipient's private key.
-
-### What happens if an attacker modifies the recipient list?
-
-The complete recipient list is included in the AAD.
-
-Any modification changes the authenticated information, causing ChaCha20-Poly1305 verification to fail.
-
-Removing a recipient also prevents that recipient from locating their encrypted file key.
-
-### What happens if the wrong public key is used?
-
-If a file key is encrypted using the wrong public key, the intended recipient cannot recover it with their private key.
-
-RSA-OAEP decryption requires the corresponding private key.
-
-The system does not automatically authenticate the identity of public-key owners; public keys must be verified before encryption.
-
-## 8. Required Security Tests
-
-The module includes the five required tests:
-
-1. **Two authorized recipients:** Alice and Bob can decrypt the same encrypted file.
-2. **Unauthorized recipient:** Charlie cannot decrypt a file shared only with Alice and Bob.
-3. **Tampered recipient list:** Modifying an encrypted key entry causes authentication failure.
-4. **Wrong private key:** An incorrect RSA private key cannot recover another recipient's encrypted file key.
-5. **Removed recipient:** Removing a recipient prevents their access and invalidates the authenticated recipient list.
-
-The tests are implemented in `tests/test_hybrid.py`.
-
-## 9. Running the Tests
-
-Install the project dependencies:
-
-```bash
+```powershell
 python -m pip install -r requirements.txt
-```
-
-Run the D3 tests:
-
-```bash
 python -m pytest tests/test_hybrid.py -v
-```
-
-Run all D2 and D3 tests:
-
-```bash
 python -m pytest tests/ -v
 ```
 
-The expected result is five passing tests for D3 and ten passing tests in total when combined with the five existing D2 tests.
+D3 includes five mandatory scenarios (two recipients, unauthorized recipient, tampered list, wrong private key, removed recipient), plus additional integrity/validation checks.
 
-## 10. Security Scope
+## 7. Migration and compatibility
 
-The module protects the confidentiality and integrity of encrypted data against an attacker who can access or modify the encrypted container but does not possess an authorized private key.
+- The **public Python API** keeps `encrypt_hybrid`, `decrypt_hybrid`, `get_key_id`, `encrypt_file_key`, `decrypt_file_key`, and `build_aad`.
+- Replace `generate_rsa_keypair()` with `generate_ecies_keypair()` in callers/tests.
+- Previous RSA-OAEP containers use version 2.0 and **are not decryptable** by this ECIES-only version 3.0 implementation. Keep a copy of the earlier Git commit if old data must remain accessible. Never relabel an old RSA container as ECIES.
+- D2 source code is **unchanged**. D3 continues to use D2's symmetric algorithm and private-metadata approach.
 
-The module does not provide digital signatures, independent sender authentication, trusted public-key distribution, or protection against compromised private keys and endpoints.
+## 8. D5 — planned extension (not yet implemented)
 
-The implementation processes file contents as bytes in memory and is intended for the academic Secure Digital Document Vault project.
+D5 will add `signature` and `signer_id` to the container, and verify the sender's Ed25519 signature **before** recovering the file key. Sign the canonical bytes of **all existing fields** (`header`, `recipients`, `nonce`, `ciphertext`, `tag`), excluding `signature` and `signer_id` from the signed payload itself, while binding `signer_id` as authenticated context. Trust in the sender's public signature key must be established independently. D5 is a separate PR/deliverable.
+
+## 9. Scope limitations
+
+This is an **academic** Secure Digital Document Vault module, not a security-audited production implementation. It does not yet provide origin signatures (D5), trusted public-key distribution, private-key recovery, compromised endpoint protection, or streaming of very large files. ECIES confidentiality does not authenticate who sent a file. Private keys must remain outside the repository.
