@@ -23,6 +23,7 @@ from src.key_management import (
     restore_keystore,
     revoke_key,
     rotate_key,
+    secure_delete_keystore,
     unlock_private_key,
 )
 
@@ -157,3 +158,7 @@ def test_key_separation_and_lifecycle(tmp_path):
     revoke_key(rot_dir, password=password)
     with pytest.raises(KeystoreLifecycleError):
         unlock_private_key(rot_dir, password=password)
+
+    # Secure deletion wipes and removes keystore directory
+    secure_delete_keystore(rot_dir)
+    assert not rot_dir.exists()

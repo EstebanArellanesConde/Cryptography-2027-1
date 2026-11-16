@@ -6,9 +6,11 @@ Design and implement a secure key management system (`src/key_management/keystor
 
 ## 2. Key Management Design
 
-### 2.1 Private Key Protection & KDF Selection
+### 2.1 Private & Public Key Protection and KDF Selection
 
-Private keys are **never stored in plaintext**. Before writing to disk, each private key (PKCS#8 DER bytes) is encrypted using **AES-256-GCM** with a 32-byte Key Encryption Key (KEK) derived from the user's password via **Argon2id** (`cryptography.hazmat.primitives.kdf.argon2.Argon2id`).
+Private keys are **never stored in plaintext**. Before writing to disk, each private key (serialized as **Raw 32 binary bytes**, consistent with the project's key format specification) is encrypted using **AES-256-GCM** with a 32-byte Key Encryption Key (KEK) derived from the user's password via **Argon2id** (`cryptography.hazmat.primitives.kdf.argon2.Argon2id`). Argon2id was selected over PBKDF2 because it is **memory-hard** and provides stronger resistance against GPU/ASIC brute-force attacks.
+
+Public keys (`public_key_der_b64`, encoded as **SubjectPublicKeyInfo DER**) are stored inside `metadata` and **integrity-protected via AES-256-GCM AAD** (alongside `kdf_parameters`), preventing silent public-key substitution or metadata tampering, and are verified against `key_id` on every unlock.
 
 **Selected KDF Parameters:**
 - **Algorithm:** `Argon2id` (memory-hard, resistant to GPU/ASIC brute-force attacks)
@@ -19,10 +21,11 @@ Private keys are **never stored in plaintext**. Before writing to disk, each pri
 - **Derived Key Length:** `32` bytes (256 bits)
 - **AEAD Cipher:** `AES-256-GCM` with a 12-byte random nonce (`os.urandom(12)`) and AAD binding `kdf_parameters` and `metadata`
 
-### 2.2 Password-Based Access
+### 2.2 Password-Based Access & Secure RAM/Cache Handling
 
 - The system prompts for the password (`getpass.getpass`) or accepts it at unlock time when accessing a private key.
 - The KEK is derived on demand and the private key is decrypted in memory only for the duration of the operation (`use_private_key` context manager).
+- Sensitive mutable buffers (KEK and decrypted Raw 32-byte private key `bytearray`) are **best-effort zeroed in RAM** (`_zero_bytearray`) in `finally` blocks, followed by reference deletion and `gc.collect()`.
 - The system **never** stores the password on disk or in global state, and **never** caches decrypted private keys indefinitely.
 
 ### 2.3 Key Storage Format
@@ -44,8 +47,8 @@ keystore/
 1. **Key Generation (`create_keystore`):** Generates independent keypairs depending on usage: `X25519` for `"encryption"` and `Ed25519` for `"signing"`.
 2. **Key Usage (`unlock_private_key` / `use_private_key`):** Enforces `expected_usage`, checks `status` (`active`, `rotated`, `revoked`), and checks `expires_at` if configured.
 3. **Key Rotation (`rotate_key`):** Verifies ownership of the current key, marks its status as `"rotated"` (kept encrypted only for decrypting historical data), and generates a new `"active"` keypair.
-4. **Key Compromise Response (`revoke_key`):** Marks the compromised key as `"revoked"` in `metadata` (blocking all future unlocking), requiring generation of a new keypair and re-encryption of shared file keys (D3).
-5. **Key Expiration (Optional):** `expires_at` (ISO-8601 UTC timestamp) in `metadata`; expired keys are rejected upon unlock.
+4. **Key Compromise & Algorithm Breakage Response (`revoke_key` / Algorithm Agility):** Marks a compromised key as `"revoked"` in `metadata` (blocking all future unlocking), requiring generation of a new keypair and re-encryption of shared file keys (D3). Because `kdf_parameters` and `metadata` explicitly record the KDF and key algorithms, unsupported or broken/deprecated algorithms are rejected at unlock time and keys can be rotated/re-encrypted to stronger algorithms.
+5. **Key Expiration & Secure Deletion (`secure_delete_keystore`):** Supports optional `expires_at` (ISO-8601 UTC timestamp) in `metadata`, and provides `secure_delete_keystore()` to overwrite keystore files with random bytes and zeros (`os.fsync`) before unlinking from disk.
 
 ### 2.5 Backup Strategy
 

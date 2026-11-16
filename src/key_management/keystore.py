@@ -7,6 +7,7 @@ using Argon2id key derivation and AES-256-GCM authenticated encryption.
 from __future__ import annotations
 
 import base64
+import gc
 import getpass
 import json
 import os
@@ -82,6 +83,12 @@ def prompt_password(prompt_text: str = "Enter keystore password: ") -> str:
     return password
 
 
+def _zero_bytearray(buf: bytearray) -> None:
+    """Best-effort in-memory zeroing of mutable sensitive buffers in RAM."""
+    for i in range(len(buf)):
+        buf[i] = 0
+
+
 def _canonical_json_bytes(obj: dict) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -115,11 +122,14 @@ def _encrypt_private_key_bytes(
     kdf_params: dict,
     metadata: dict,
 ) -> bytes:
-    kek = _derive_kek(password, salt, kdf_params)
-    nonce = os.urandom(NONCE_SIZE)
-    aad = _build_aad(kdf_params, metadata)
-    ciphertext = AESGCM(kek).encrypt(nonce, private_der, aad)
-    return nonce + ciphertext
+    kek_buf = bytearray(_derive_kek(password, salt, kdf_params))
+    try:
+        nonce = os.urandom(NONCE_SIZE)
+        aad = _build_aad(kdf_params, metadata)
+        ciphertext = AESGCM(bytes(kek_buf)).encrypt(nonce, private_der, aad)
+        return nonce + ciphertext
+    finally:
+        _zero_bytearray(kek_buf)
 
 
 def _load_keystore_files(keystore_dir: str | Path) -> tuple[bytes, bytes, dict, dict]:
@@ -171,6 +181,14 @@ def _write_keystore_files(
     )
 
 
+def _serialize_raw_private_key(private_key) -> bytes:
+    return private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+
 def create_keystore(
     keystore_dir: str | Path,
     usage: str,
@@ -191,11 +209,7 @@ def create_keystore(
         private_key, public_key = generate_signing_keypair()
         key_id = get_signer_id(public_key)
 
-    private_der = private_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
+    private_raw = _serialize_raw_private_key(private_key)
     public_der = public_key.public_bytes(
         encoding=serialization.Encoding.DER,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -214,7 +228,7 @@ def create_keystore(
     }
 
     encrypted_blob = _encrypt_private_key_bytes(
-        private_der, password, salt, kdf_params, metadata
+        private_raw, password, salt, kdf_params, metadata
     )
     _write_keystore_files(keystore_dir, encrypted_blob, salt, kdf_params, metadata)
     return metadata
@@ -235,51 +249,53 @@ def unlock_private_key(
     if password is None:
         password = prompt_password("Enter keystore password: ")
 
-    kek = _derive_kek(password, salt, kdf_params)
+    kek_buf = bytearray(_derive_kek(password, salt, kdf_params))
     nonce = encrypted_blob[:NONCE_SIZE]
     ciphertext = encrypted_blob[NONCE_SIZE:]
     aad = _build_aad(kdf_params, metadata)
+    private_raw_buf = bytearray()
 
     try:
-        private_der = AESGCM(kek).decrypt(nonce, ciphertext, aad)
-    except InvalidTag as exc:
-        raise KeystoreAccessError(
-            "Failed to unlock keystore: wrong password or modified keystore."
-        ) from exc
+        try:
+            private_raw_buf.extend(AESGCM(bytes(kek_buf)).decrypt(nonce, ciphertext, aad))
+        except InvalidTag as exc:
+            raise KeystoreAccessError(
+                "Failed to unlock keystore: wrong password or modified keystore."
+            ) from exc
 
-    status = metadata.get("status")
-    if status == "revoked":
-        raise KeystoreLifecycleError("Key has been revoked due to compromise.")
-    if status == "rotated" and not allow_rotated:
-        raise KeystoreLifecycleError("Key has been rotated and is no longer active.")
-    if status not in ("active", "rotated"):
-        raise KeystoreIntegrityError(f"Unknown key status: {status}")
+        status = metadata.get("status")
+        if status == "revoked":
+            raise KeystoreLifecycleError("Key has been revoked due to compromise.")
+        if status == "rotated" and not allow_rotated:
+            raise KeystoreLifecycleError("Key has been rotated and is no longer active.")
+        if status not in ("active", "rotated"):
+            raise KeystoreIntegrityError(f"Unknown key status: {status}")
 
-    expires_at = metadata.get("expires_at")
-    if expires_at is not None:
-        exp_dt = datetime.fromisoformat(expires_at)
-        if exp_dt.tzinfo is None:
-            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) > exp_dt:
-            raise KeystoreLifecycleError("Key has expired.")
+        expires_at = metadata.get("expires_at")
+        if expires_at is not None:
+            exp_dt = datetime.fromisoformat(expires_at)
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp_dt:
+                raise KeystoreLifecycleError("Key has expired.")
 
-    usage = metadata.get("usage")
-    if expected_usage is not None and usage != expected_usage:
-        raise KeystoreLifecycleError(
-            f"Key usage mismatch: expected '{expected_usage}', got '{usage}'."
-        )
+        usage = metadata.get("usage")
+        if expected_usage is not None and usage != expected_usage:
+            raise KeystoreLifecycleError(
+                f"Key usage mismatch: expected '{expected_usage}', got '{usage}'."
+            )
 
-    private_key = serialization.load_der_private_key(private_der, password=None)
-    if usage == "encryption":
-        if not isinstance(private_key, X25519PrivateKey):
-            raise KeystoreIntegrityError("Decrypted key is not an X25519 private key.")
-        derived_id = get_key_id(private_key.public_key())
-    elif usage == "signing":
-        if not isinstance(private_key, Ed25519PrivateKey):
-            raise KeystoreIntegrityError("Decrypted key is not an Ed25519 private key.")
-        derived_id = get_signer_id(private_key.public_key())
-    else:
-        raise KeystoreIntegrityError(f"Unsupported key usage: {usage}")
+        if usage == "encryption":
+            private_key = X25519PrivateKey.from_private_bytes(bytes(private_raw_buf))
+            derived_id = get_key_id(private_key.public_key())
+        elif usage == "signing":
+            private_key = Ed25519PrivateKey.from_private_bytes(bytes(private_raw_buf))
+            derived_id = get_signer_id(private_key.public_key())
+        else:
+            raise KeystoreIntegrityError(f"Unsupported key usage: {usage}")
+    finally:
+        _zero_bytearray(kek_buf)
+        _zero_bytearray(private_raw_buf)
 
     if derived_id != metadata.get("key_id"):
         raise KeystoreIntegrityError("Key identity mismatch between private key and metadata.")
@@ -305,6 +321,7 @@ def use_private_key(
         yield private_key
     finally:
         del private_key
+        gc.collect()
 
 
 def rotate_key(
@@ -328,15 +345,11 @@ def rotate_key(
 
     old_metadata["status"] = "rotated"
     old_metadata["rotated_at"] = datetime.now(timezone.utc).isoformat()
-    old_private_der = private_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
+    old_private_raw = _serialize_raw_private_key(private_key)
     new_salt = os.urandom(SALT_SIZE)
     new_kdf_params = dict(DEFAULT_KDF_PARAMS)
     updated_blob = _encrypt_private_key_bytes(
-        old_private_der, old_password, new_salt, new_kdf_params, old_metadata
+        old_private_raw, old_password, new_salt, new_kdf_params, old_metadata
     )
     _write_keystore_files(
         old_keystore_dir, updated_blob, new_salt, new_kdf_params, old_metadata
@@ -362,15 +375,11 @@ def revoke_key(keystore_dir: str | Path, password: str | None = None) -> dict:
     metadata["status"] = "revoked"
     metadata["revoked_at"] = datetime.now(timezone.utc).isoformat()
 
-    private_der = private_key.private_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
+    private_raw = _serialize_raw_private_key(private_key)
     new_salt = os.urandom(SALT_SIZE)
     new_kdf_params = dict(DEFAULT_KDF_PARAMS)
     updated_blob = _encrypt_private_key_bytes(
-        private_der, password, new_salt, new_kdf_params, metadata
+        private_raw, password, new_salt, new_kdf_params, metadata
     )
     _write_keystore_files(keystore_dir, updated_blob, new_salt, new_kdf_params, metadata)
     return metadata
@@ -406,6 +415,30 @@ def restore_keystore(backup_path: str | Path, target_dir: str | Path) -> Path:
 
     _load_keystore_files(dst)
     return dst
+
+
+def secure_delete_keystore(keystore_dir: str | Path) -> None:
+    """Securely wipe keystore files (random overwrite + zero pass) before deleting."""
+    base = Path(keystore_dir)
+    if not base.exists():
+        return
+    for filename in REQUIRED_FILES:
+        file_path = base / filename
+        if file_path.is_file():
+            size = file_path.stat().st_size
+            with open(file_path, "r+b") as f:
+                f.write(os.urandom(size))
+                f.flush()
+                os.fsync(f.fileno())
+                f.seek(0)
+                f.write(b"\x00" * size)
+                f.flush()
+                os.fsync(f.fileno())
+            file_path.unlink()
+    try:
+        base.rmdir()
+    except OSError:
+        pass
 
 
 def decrypt_file_with_keystore(

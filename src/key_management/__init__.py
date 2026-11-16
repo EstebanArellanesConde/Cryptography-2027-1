@@ -12,6 +12,7 @@ from src.key_management.keystore import (
     restore_keystore,
     revoke_key,
     rotate_key,
+    secure_delete_keystore,
     unlock_private_key,
     use_private_key,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "restore_keystore",
     "revoke_key",
     "rotate_key",
+    "secure_delete_keystore",
     "unlock_private_key",
     "use_private_key",
 ]
