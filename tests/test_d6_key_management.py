@@ -162,3 +162,44 @@ def test_key_separation_and_lifecycle(tmp_path):
     # Secure deletion wipes and removes keystore directory
     secure_delete_keystore(rot_dir)
     assert not rot_dir.exists()
+
+def test_create_keystore_prevents_overwrite(tmp_path):
+    """
+    D6: comprueba que crear un keystore existente
+    no destruya las claves ni los metadatos anteriores.
+    """
+
+    keystore_dir = tmp_path / "alice_keystore"
+
+    # Crear el primer keystore.
+    create_keystore(
+        keystore_dir,
+        usage="encryption",
+        password="PasswordSegura123!",
+    )
+
+    # Guardar una copia de los archivos originales.
+    filenames = (
+        "encrypted_private_key",
+        "salt",
+        "kdf_parameters",
+        "metadata",
+    )
+
+    original_files = {
+        name: (keystore_dir / name).read_bytes()
+        for name in filenames
+    }
+
+    # Intentar crear otro keystore en la misma ruta.
+    # La implementacion segura debe rechazarlo.
+    with pytest.raises(FileExistsError):
+        create_keystore(
+            keystore_dir,
+            usage="encryption",
+            password="PasswordNueva456!",
+        )
+
+    # Verificar que los archivos originales no cambiaron.
+    for name in filenames:
+        assert (keystore_dir / name).read_bytes() == original_files[name]

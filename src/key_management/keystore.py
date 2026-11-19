@@ -230,6 +230,7 @@ def create_keystore(
     encrypted_blob = _encrypt_private_key_bytes(
         private_raw, password, salt, kdf_params, metadata
     )
+    Path(keystore_dir).mkdir(parents=True, exist_ok=False, mode=0o700)
     _write_keystore_files(keystore_dir, encrypted_blob, salt, kdf_params, metadata)
     return metadata
 
