@@ -35,6 +35,14 @@ def test_reject_malformed_container(tmp_path, scenario):
     if scenario == "invalid_json":
         modified_bytes = b'{"header":'
 
+    else:
+        if scenario == "missing_nonce":
+            del container["nonce"]
+
+        modified_bytes = json.dumps(
+            container
+        ).encode("utf-8")
+
     # 3. Guardar el contenedor manipulado.
     encrypted_file = tmp_path / "damaged.vault"
     encrypted_file.write_bytes(modified_bytes)
@@ -54,3 +62,11 @@ def test_reject_malformed_container(tmp_path, scenario):
 
     # 5. No se debe generar un archivo de salida.
     assert not output_file.exists()
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "invalid_json",
+            "missing_nonce",
+        ],
+    )
