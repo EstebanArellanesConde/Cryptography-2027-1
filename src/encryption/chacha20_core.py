@@ -1,10 +1,17 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+from binascii import Error as Base64Error
+
+#Límite máximo de archivo permitido por D2: 256MiB
+MAX_FILE_SIZE = 256 * 1024 * 1024  # 256 MiB
 
 def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
+    # Se verifica que el tamaño del archivo no supere el límite de 256 MiB.
+    if len(plaintext) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # 1. Se genera una llave de 32 bytes y un nonce de 12 bytes de forma aleatoria y segura. 
     # El nonce nunca debe repetirse con la misma llave.
     key = ChaCha20Poly1305.generate_key()
@@ -13,7 +20,7 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     # 2. Se crea un diccionario con los metadatos que se desean ocultar (nombre, fecha y tamaño).
     metadata = {
         "filename": filename,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "plaintext_size": len(plaintext)
     }
     # Se convierten los metadatos a formato JSON y luego a bytes para poder encriptarlos.
@@ -59,6 +66,9 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     return json.dumps(container, indent=2).encode('utf-8'), key
 
 def encrypt_file(input_path: str, output_path: str) -> bytes:
+    # Verificar el tamaño antes de cargar el archivo.
+    if os.path.getsize(input_path) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # Se lee todo el contenido del archivo original en modo binario ('rb').
     with open(input_path, 'rb') as f:
         plaintext = f.read()
@@ -66,46 +76,179 @@ def encrypt_file(input_path: str, output_path: str) -> bytes:
     # Se llama a la función principal de encriptación pasándole los datos y el nombre del archivo.
     container_bytes, key = encrypt_bytes(plaintext, os.path.basename(input_path))
     
-    # Se guarda el JSON resultante en un nuevo archivo.
-    with open(output_path, 'wb') as f:
+    # El modo 'xb' evita sobreescribir archivos existentes. Si el archivo ya existe, lanzará un error.
+    with open(output_path, 'xb') as f:
         f.write(container_bytes)
         
     # Se retorna la llave para que el usuario la guarde. ¡Ojo, la llave no se guarda en el archivo por seguridad!
     return key
 
 def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
-    # Se lee el archivo encriptado (que es un JSON) y se convierte a diccionario.
-    with open(input_path, 'r') as f:
-        container = json.load(f)
+    """
+    D2: descifra un contenedor con ChaCha20-Poly1305.
 
-    # Se revierte la conversión Base64 para recuperar los bytes originales.
-    nonce = b64decode(container["nonce"])
-    
-    # Se vuelve a unir el texto cifrado y el tag de autenticación porque así lo requiere la librería para desencriptar.
-    ct_with_tag = b64decode(container["ciphertext"]) + b64decode(container["tag"])
-    
-    # Se reconstruye el AAD exactamente como estaba. (Se usa sort_keys=True para garantizar el mismo orden).
-    aad = json.dumps(container["header"], sort_keys=True).encode('utf-8')
+    Rechaza contenedores malformados mediante ValueError.
+    Conserva la verificacion criptografica de autenticidad.
+    No sobrescribe archivos existentes.
+    """
 
-    # Se configura el desencriptador con la llave proporcionada.
+    # 1. Rechazar campos JSON duplicados.
+    def reject_duplicates(pairs):
+        result = {}
+
+        for name, value in pairs:
+            if name in result:
+                raise ValueError(
+                    "Contenedor D2 invalido: campo JSON duplicado."
+                )
+            result[name] = value
+
+        return result
+
+    # 2. Leer el contenedor JSON.
+    try:
+        with open(input_path, "r", encoding="utf-8") as f:
+            container = json.load(
+                f,
+                object_pairs_hook=reject_duplicates,
+            )
+
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: JSON malformado."
+        ) from error
+    
+    # 3. Validar la estructura del contenedor.
+    required_fields = {
+        "header",
+        "nonce",
+        "ciphertext",
+        "tag",
+    }
+
+    if not isinstance(container, dict):
+        raise ValueError(
+            "Contenedor D2 invalido: estructura incorrecta."
+        )
+
+    if set(container.keys()) != required_fields:
+        raise ValueError(
+            "Contenedor D2 invalido: campos incompletos o inesperados."
+        )
+
+    # 4. Validar los tipos de datos.
+    if not isinstance(container["header"], dict):
+        raise ValueError(
+            "Contenedor D2 invalido: encabezado incorrecto."
+        )
+
+    for field in ("nonce", "ciphertext", "tag"):
+        if not isinstance(container[field], str):
+            raise ValueError(
+                f"Contenedor D2 invalido: tipo incorrecto en {field}."
+            )
+
+    # 5. Decodificar Base64 estrictamente.
+    try:
+        nonce = b64decode(
+            container["nonce"],
+            validate=True,
+        )
+
+        ciphertext = b64decode(
+            container["ciphertext"],
+            validate=True,
+        )
+
+        tag = b64decode(
+            container["tag"],
+            validate=True,
+        )
+
+    except (Base64Error, ValueError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: Base64 incorrecto."
+        ) from error
+
+    # 6. Validar la longitud del nonce y del tag.
+    if len(nonce) != 12:
+        raise ValueError(
+            "Contenedor D2 invalido: nonce incorrecto."
+        )
+
+    if len(tag) != 16:
+        raise ValueError(
+            "Contenedor D2 invalido: tag incorrecto."
+        )
+
+    # 7. Reconstruir los datos autenticados (AAD).
+    try:
+        aad = json.dumps(
+            container["header"],
+            sort_keys=True,
+        ).encode("utf-8")
+
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: encabezado incorrecto."
+        ) from error
+
+    # 8. Descifrar y verificar la autenticacion.
+    # Si la clave o los datos autenticados fueron
+    # modificados, ChaCha20-Poly1305 rechaza el mensaje.
     chacha = ChaCha20Poly1305(key)
-    
-    # Se desencripta. Si un solo bit del archivo, del tag, o del header (AAD) fue modificado por un atacante, 
-    # esta línea fallará automáticamente lanzando un error "InvalidTag".
-    payload = chacha.decrypt(nonce, ct_with_tag, aad)
 
-    # Se extraen los primeros 4 bytes para saber de qué tamaño son los metadatos.
-    meta_len = int.from_bytes(payload[:4], 'big')
-    
-    # Se corta el payload usando ese tamaño para recuperar el JSON de metadatos y convertirlo a diccionario.
-    metadata = json.loads(payload[4:4+meta_len].decode('utf-8'))
-    
-    # El resto de la información es el archivo original intacto.
-    plaintext = payload[4+meta_len:]
-    
-    # Se guarda el archivo original ya desencriptado en la ruta destino.
-    with open(output_path, 'wb') as f:
+    payload = chacha.decrypt(
+        nonce,
+        ciphertext + tag,
+        aad,
+    )
+
+    # 9. Validar la longitud de los metadatos privados.
+    if len(payload) < 4:
+        raise ValueError(
+            "Contenedor D2 invalido: payload incompleto."
+        )
+
+    meta_len = int.from_bytes(
+        payload[:4],
+        "big",
+    )
+
+    if meta_len > len(payload) - 4:
+        raise ValueError(
+            "Contenedor D2 invalido: longitud de metadatos."
+        )
+
+    # 10. Recuperar los metadatos privados.
+    try:
+        metadata = json.loads(
+            payload[4:4 + meta_len].decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
+
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: metadatos incorrectos."
+        ) from error
+
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            "Contenedor D2 invalido: metadatos incorrectos."
+        )
+
+    # 11. Recuperar el archivo original.
+    plaintext = payload[4 + meta_len:]
+
+    # 12. Respetar el limite de 256 MiB.
+    if len(plaintext) > MAX_FILE_SIZE:
+        raise ValueError(
+            "El archivo descifrado supera el limite de 256 MiB."
+        )
+
+    # 13. Guardar sin sobrescribir archivos existentes.
+    with open(output_path, "xb") as f:
         f.write(plaintext)
-        
-    # Se devuelven los metadatos ocultos por si el programa los necesita.
+
+    # 14. Devolver los metadatos recuperados.
     return metadata
