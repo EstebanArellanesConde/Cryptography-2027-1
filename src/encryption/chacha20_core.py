@@ -66,8 +66,8 @@ def encrypt_file(input_path: str, output_path: str) -> bytes:
     # Se llama a la función principal de encriptación pasándole los datos y el nombre del archivo.
     container_bytes, key = encrypt_bytes(plaintext, os.path.basename(input_path))
     
-    # Se guarda el JSON resultante en un nuevo archivo.
-    with open(output_path, 'wb') as f:
+    # El modo 'xb' evita sobreescribir archivos existentes. Si el archivo ya existe, lanzará un error.
+    with open(output_path, 'xb') as f:
         f.write(container_bytes)
         
     # Se retorna la llave para que el usuario la guarde. ¡Ojo, la llave no se guarda en el archivo por seguridad!
@@ -103,8 +103,8 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
     # El resto de la información es el archivo original intacto.
     plaintext = payload[4+meta_len:]
     
-    # Se guarda el archivo original ya desencriptado en la ruta destino.
-    with open(output_path, 'wb') as f:
+    # Recuperar el archivo sin sobreescribir uno existente.
+    with open(output_path, 'xb') as f:
         f.write(plaintext)
         
     # Se devuelven los metadatos ocultos por si el programa los necesita.
