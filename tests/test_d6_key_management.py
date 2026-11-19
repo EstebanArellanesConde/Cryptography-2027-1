@@ -1,5 +1,7 @@
 """D6 automated security tests for Key Management System."""
 
+import os
+import stat
 import base64
 import json
 import shutil
@@ -203,3 +205,60 @@ def test_create_keystore_prevents_overwrite(tmp_path):
     # Verificar que los archivos originales no cambiaron.
     for name in filenames:
         assert (keystore_dir / name).read_bytes() == original_files[name]
+
+
+def test_keystore_restrictive_file_permissions(tmp_path):
+    """
+    D6: verifica que el directorio y los archivos
+    del Keystore tengan permisos restrictivos.
+
+    Directorio: 0700
+    Archivos: 0600
+    """
+
+    keystore_dir = tmp_path / "secure_keystore"
+
+    # Simular una configuracion comun de permisos Linux.
+    # Restaurar siempre la umask original.
+    original_umask = os.umask(0o022)
+
+    try:
+        create_keystore(
+            keystore_dir,
+            usage="encryption",
+            password="PasswordSegura123!",
+        )
+    finally:
+        os.umask(original_umask)
+
+    # 1. Verificar permisos del directorio.
+    directory_mode = stat.S_IMODE(
+        keystore_dir.stat().st_mode
+    )
+
+    assert directory_mode == 0o700, (
+        f"Permisos del directorio incorrectos: "
+        f"{oct(directory_mode)}"
+    )
+
+    # 2. Verificar permisos de los archivos.
+    filenames = (
+        "encrypted_private_key",
+        "salt",
+        "kdf_parameters",
+        "metadata",
+    )
+
+    for filename in filenames:
+        file_path = keystore_dir / filename
+
+        assert file_path.is_file()
+
+        file_mode = stat.S_IMODE(
+            file_path.stat().st_mode
+        )
+
+        assert file_mode == 0o600, (
+            f"{filename} tiene permisos inseguros: "
+            f"{oct(file_mode)}"
+        )

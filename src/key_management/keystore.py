@@ -12,6 +12,7 @@ import getpass
 import json
 import os
 import zipfile
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -159,7 +160,6 @@ def _load_keystore_files(keystore_dir: str | Path) -> tuple[bytes, bytes, dict, 
 
     return encrypted_blob, salt, kdf_params, metadata
 
-
 def _write_keystore_files(
     keystore_dir: str | Path,
     encrypted_blob: bytes,
@@ -167,18 +167,76 @@ def _write_keystore_files(
     kdf_params: dict,
     metadata: dict,
 ) -> None:
+    """
+    Guarda los archivos del Keystore con permisos restrictivos.
+
+    En Linux:
+    - Directorio: 0700.
+    - Archivos: 0600.
+
+    Cada archivo se prepara temporalmente y se reemplaza
+    de forma atomica por separado.
+    """
+
     base = Path(keystore_dir)
-    base.mkdir(parents=True, exist_ok=True)
-    (base / "encrypted_private_key").write_bytes(encrypted_blob)
-    (base / "salt").write_bytes(salt)
-    (base / "kdf_parameters").write_text(
-        json.dumps(kdf_params, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    (base / "metadata").write_text(
-        json.dumps(metadata, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+
+    # 1. No aceptar un directorio Keystore simbolico.
+    if base.is_symlink():
+        raise ValueError("No se permite un Keystore simbolico.")
+
+    # 2. Preparar el directorio privado.
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    if os.name == "posix":
+        base.chmod(0o700)
+
+    # 3. Preparar los contenidos de los cuatro archivos.
+    files = {
+        "encrypted_private_key": encrypted_blob,
+        "salt": salt,
+        "kdf_parameters": json.dumps(
+            kdf_params,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8"),
+        "metadata": json.dumps(
+            metadata,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8"),
+    }
+
+    # 4. Guardar cada archivo con permisos seguros.
+    for filename, content in files.items():
+
+        # Crear archivo temporal dentro del mismo directorio.
+        # mkstemp utiliza permisos restrictivos en POSIX.
+        fd, temporary_path = tempfile.mkstemp(
+            prefix=f".{filename}.",
+            dir=base,
+        )
+
+        try:
+            with os.fdopen(fd, "wb") as file:
+
+                # Asegurar permisos 0600 antes de escribir.
+                if os.name == "posix":
+                    os.fchmod(file.fileno(), 0o600)
+
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+
+            # Reemplazar un archivo completo, no uno parcial.
+            os.replace(
+                temporary_path,
+                base / filename,
+            )
+
+        finally:
+            # Eliminar el temporal si ocurrio algun error.
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
 
 
 def _serialize_raw_private_key(private_key) -> bytes:
