@@ -1,10 +1,16 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
+#Límite máximo de archivo permitido por D2: 256MiB
+MAX_FILE_SIZE = 256 * 1024 * 1024  # 256 MiB
+
 def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
+    # Se verifica que el tamaño del archivo no supere el límite de 256 MiB.
+    if len(plaintext) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # 1. Se genera una llave de 32 bytes y un nonce de 12 bytes de forma aleatoria y segura. 
     # El nonce nunca debe repetirse con la misma llave.
     key = ChaCha20Poly1305.generate_key()
@@ -13,7 +19,7 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     # 2. Se crea un diccionario con los metadatos que se desean ocultar (nombre, fecha y tamaño).
     metadata = {
         "filename": filename,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "plaintext_size": len(plaintext)
     }
     # Se convierten los metadatos a formato JSON y luego a bytes para poder encriptarlos.
@@ -59,6 +65,9 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     return json.dumps(container, indent=2).encode('utf-8'), key
 
 def encrypt_file(input_path: str, output_path: str) -> bytes:
+    # Verificar el tamaño antes de cargar el archivo.
+    if os.path.getsize(input_path) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # Se lee todo el contenido del archivo original en modo binario ('rb').
     with open(input_path, 'rb') as f:
         plaintext = f.read()
@@ -66,8 +75,8 @@ def encrypt_file(input_path: str, output_path: str) -> bytes:
     # Se llama a la función principal de encriptación pasándole los datos y el nombre del archivo.
     container_bytes, key = encrypt_bytes(plaintext, os.path.basename(input_path))
     
-    # Se guarda el JSON resultante en un nuevo archivo.
-    with open(output_path, 'wb') as f:
+    # El modo 'xb' evita sobreescribir archivos existentes. Si el archivo ya existe, lanzará un error.
+    with open(output_path, 'xb') as f:
         f.write(container_bytes)
         
     # Se retorna la llave para que el usuario la guarde. ¡Ojo, la llave no se guarda en el archivo por seguridad!
@@ -102,9 +111,13 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
     
     # El resto de la información es el archivo original intacto.
     plaintext = payload[4+meta_len:]
+
+    # Evitar recuperar archivos mayores al limite permitido.
+    if len(plaintext) > MAX_FILE_SIZE:
+        raise ValueError("El archivo descifrado supera el limite de 256 MiB.")
     
-    # Se guarda el archivo original ya desencriptado en la ruta destino.
-    with open(output_path, 'wb') as f:
+    # Recuperar el archivo sin sobreescribir uno existente.
+    with open(output_path, 'xb') as f:
         f.write(plaintext)
         
     # Se devuelven los metadatos ocultos por si el programa los necesita.
