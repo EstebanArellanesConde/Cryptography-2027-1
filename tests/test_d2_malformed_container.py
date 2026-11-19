@@ -13,6 +13,10 @@ from encryption.chacha20_core import (
     "scenario",
     [
         "invalid_json",
+        "missing_nonce",
+        "wrong_ciphertext_type",
+        "invalid_base64",
+        "missing_tag",
     ],
 )
 def test_reject_malformed_container(tmp_path, scenario):
@@ -72,10 +76,4 @@ def test_reject_malformed_container(tmp_path, scenario):
     # 5. No se debe generar un archivo de salida.
     assert not output_file.exists()
 
-    @pytest.mark.parametrize(
-        "scenario",
-        [
-            "invalid_json",
-            "missing_nonce",
-        ],
-    )
+    
