@@ -94,21 +94,74 @@ def _canonical_json_bytes(obj: dict) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _derive_kek(password: str, salt: bytes, kdf_params: dict) -> bytes:
+def _derive_kek(
+    password: str,
+    salt: bytes,
+    kdf_params: dict,
+) -> bytes:
+    """
+    Deriva una clave AES-256 mediante Argon2id.
+
+    Valida los parametros antes de ejecutar Argon2id
+    para evitar consumo excesivo de recursos.
+    """
+
+    # 1. Validar la contrasena.
     if not isinstance(password, str) or not password:
-        raise KeystoreAccessError("Password must be a non-empty string.")
+        raise KeystoreAccessError(
+            "Password must be a non-empty string."
+        )
+
+    # 2. Validar el algoritmo permitido.
+    if not isinstance(kdf_params, dict):
+        raise KeystoreIntegrityError(
+            "Invalid KDF parameters."
+        )
+
     if kdf_params.get("kdf") != "Argon2id":
-        raise KeystoreIntegrityError(f"Unsupported KDF: {kdf_params.get('kdf')}")
+        raise KeystoreIntegrityError(
+            "Unsupported KDF."
+        )
+
+    # 3. Limites de seguridad definidos para D6.
+    # memory_cost se expresa en KiB.
+    limits = {
+        "iterations": (3, 6),
+        "lanes": (1, 4),
+        "memory_cost": (65536, 131072),
+        "length": (32, 32),
+    }
+
+    # 4. Validar todos los parametros antes de derivar.
+    for parameter, (minimum, maximum) in limits.items():
+        value = kdf_params.get(parameter)
+
+        if type(value) is not int:
+            raise KeystoreIntegrityError(
+                f"Invalid Argon2id parameter: {parameter}"
+            )
+
+        if not minimum <= value <= maximum:
+            raise KeystoreIntegrityError(
+                f"Unsafe Argon2id parameter: {parameter}"
+            )
+
+    # 5. Crear Argon2id solamente con parametros seguros.
     try:
         kdf = Argon2id(
             salt=salt,
-            length=int(kdf_params["length"]),
-            iterations=int(kdf_params["iterations"]),
-            lanes=int(kdf_params["lanes"]),
-            memory_cost=int(kdf_params["memory_cost"]),
+            length=kdf_params["length"],
+            iterations=kdf_params["iterations"],
+            lanes=kdf_params["lanes"],
+            memory_cost=kdf_params["memory_cost"],
         )
+
     except (KeyError, TypeError, ValueError) as exc:
-        raise KeystoreIntegrityError("Invalid KDF parameters.") from exc
+        raise KeystoreIntegrityError(
+            "Invalid KDF parameters."
+        ) from exc
+
+    # 6. Derivar la clave.
     return kdf.derive(password.encode("utf-8"))
 
 
