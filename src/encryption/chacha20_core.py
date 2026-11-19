@@ -148,6 +148,62 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
                 f"Contenedor D2 invalido: tipo incorrecto en {field}."
             )
 
+    # 5. Decodificar Base64 estrictamente.
+    try:
+        nonce = b64decode(
+            container["nonce"],
+            validate=True,
+        )
+
+        ciphertext = b64decode(
+            container["ciphertext"],
+            validate=True,
+        )
+
+        tag = b64decode(
+            container["tag"],
+            validate=True,
+        )
+
+    except (Base64Error, ValueError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: Base64 incorrecto."
+        ) from error
+
+    # 6. Validar la longitud del nonce y del tag.
+    if len(nonce) != 12:
+        raise ValueError(
+            "Contenedor D2 invalido: nonce incorrecto."
+        )
+
+    if len(tag) != 16:
+        raise ValueError(
+            "Contenedor D2 invalido: tag incorrecto."
+        )
+
+    # 7. Reconstruir los datos autenticados (AAD).
+    try:
+        aad = json.dumps(
+            container["header"],
+            sort_keys=True,
+        ).encode("utf-8")
+
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: encabezado incorrecto."
+        ) from error
+
+    # 8. Descifrar y verificar la autenticacion.
+    # Si la clave o los datos autenticados fueron
+    # modificados, ChaCha20-Poly1305 rechaza el mensaje.
+    chacha = ChaCha20Poly1305(key)
+
+    payload = chacha.decrypt(
+        nonce,
+        ciphertext + tag,
+        aad,
+    )
+
     # Se revierte la conversión Base64 para recuperar los bytes originales.
     nonce = b64decode(container["nonce"])
     
