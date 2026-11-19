@@ -44,7 +44,10 @@ def test_reject_malformed_container(tmp_path, scenario):
 
         elif scenario == "invalid_base64":
             container["nonce"] = "%%%"
-            
+
+        elif scenario == "missing_tag":
+            del container["tag"]
+
         modified_bytes = json.dumps(
             container
         ).encode("utf-8")
