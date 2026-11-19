@@ -7,6 +7,7 @@ import json
 import shutil
 
 import pytest
+import src.key_management.keystore as keystore_module
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
@@ -261,4 +262,59 @@ def test_keystore_restrictive_file_permissions(tmp_path):
         assert file_mode == 0o600, (
             f"{filename} tiene permisos inseguros: "
             f"{oct(file_mode)}"
+        )
+
+@pytest.mark.parametrize(
+    "parameter, invalid_value",
+    [
+        ("memory_cost", 1_000_000_000),
+        ("memory_cost", -1),
+        ("iterations", 0),
+        ("iterations", 1_000_000),
+        ("lanes", 0),
+        ("lanes", 1_000_000),
+        ("length", 1_000_000),
+    ],
+)
+def test_reject_unsafe_argon2id_parameters(
+    monkeypatch,
+    parameter,
+    invalid_value,
+):
+    """
+    D6: comprobar que los parametros peligrosos
+    sean rechazados antes de ejecutar Argon2id.
+    """
+
+    # 1. Partir de la configuracion valida del proyecto.
+    params = dict(
+        keystore_module.DEFAULT_KDF_PARAMS
+    )
+
+    # 2. Simular un parametro manipulado.
+    params[parameter] = invalid_value
+
+    # 3. Impedir que se ejecute Argon2id realmente.
+    # Esto evita consumir memoria excesiva en las pruebas.
+    class ForbiddenArgon2id:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "Argon2id fue invocado antes "
+                "de validar sus parametros."
+            )
+
+    monkeypatch.setattr(
+        keystore_module,
+        "Argon2id",
+        ForbiddenArgon2id,
+    )
+
+    # 4. La validacion debe rechazar el parametro.
+    with pytest.raises(
+        keystore_module.KeystoreIntegrityError
+    ):
+        keystore_module._derive_kek(
+            "PasswordSegura123!",
+            b"\x01" * 16,
+            params,
         )
