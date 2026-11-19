@@ -117,6 +117,36 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
         raise ValueError(
             "Contenedor D2 invalido: JSON malformado."
         ) from error
+    
+    # 3. Validar la estructura del contenedor.
+    required_fields = {
+        "header",
+        "nonce",
+        "ciphertext",
+        "tag",
+    }
+
+    if not isinstance(container, dict):
+        raise ValueError(
+            "Contenedor D2 invalido: estructura incorrecta."
+        )
+
+    if set(container.keys()) != required_fields:
+        raise ValueError(
+            "Contenedor D2 invalido: campos incompletos o inesperados."
+        )
+
+    # 4. Validar los tipos de datos.
+    if not isinstance(container["header"], dict):
+        raise ValueError(
+            "Contenedor D2 invalido: encabezado incorrecto."
+        )
+
+    for field in ("nonce", "ciphertext", "tag"):
+        if not isinstance(container[field], str):
+            raise ValueError(
+                f"Contenedor D2 invalido: tipo incorrecto en {field}."
+            )
 
     # Se revierte la conversión Base64 para recuperar los bytes originales.
     nonce = b64decode(container["nonce"])
