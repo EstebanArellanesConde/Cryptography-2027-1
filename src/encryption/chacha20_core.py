@@ -84,9 +84,39 @@ def encrypt_file(input_path: str, output_path: str) -> bytes:
     return key
 
 def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
-    # Se lee el archivo encriptado (que es un JSON) y se convierte a diccionario.
-    with open(input_path, 'r') as f:
-        container = json.load(f)
+    """
+    D2: descifra un contenedor con ChaCha20-Poly1305.
+
+    Rechaza contenedores malformados mediante ValueError.
+    Conserva la verificacion criptografica de autenticidad.
+    No sobrescribe archivos existentes.
+    """
+
+    # 1. Rechazar campos JSON duplicados.
+    def reject_duplicates(pairs):
+        result = {}
+
+        for name, value in pairs:
+            if name in result:
+                raise ValueError(
+                    "Contenedor D2 invalido: campo JSON duplicado."
+                )
+            result[name] = value
+
+        return result
+
+    # 2. Leer el contenedor JSON.
+    try:
+        with open(input_path, "r", encoding="utf-8") as f:
+            container = json.load(
+                f,
+                object_pairs_hook=reject_duplicates,
+            )
+
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: JSON malformado."
+        ) from error
 
     # Se revierte la conversión Base64 para recuperar los bytes originales.
     nonce = b64decode(container["nonce"])
