@@ -510,23 +510,95 @@ def backup_keystore(keystore_dir: str | Path, backup_path: str | Path) -> Path:
     return dst
 
 
-def restore_keystore(backup_path: str | Path, target_dir: str | Path) -> Path:
-    """Restore an encrypted keystore from a backup zip archive."""
+def restore_keystore(
+    backup_path: str | Path,
+    target_dir: str | Path,
+) -> Path:
+    """
+    D6: restaura un Keystore desde un respaldo ZIP.
+
+    - Rechaza respaldos corruptos.
+    - No sobrescribe Keystores existentes.
+    - Utiliza permisos restrictivos.
+    - Limpia el directorio si ocurre un error.
+    """
+
     src_zip = Path(backup_path)
-    if not src_zip.is_file():
-        raise KeystoreIntegrityError(f"Backup file not found: {src_zip}")
-
     dst = Path(target_dir)
-    dst.mkdir(parents=True, exist_ok=True)
 
-    with zipfile.ZipFile(src_zip, "r") as zf:
-        names = set(zf.namelist())
-        if not set(REQUIRED_FILES).issubset(names):
-            raise KeystoreIntegrityError("Backup archive is missing required keystore files.")
-        for filename in REQUIRED_FILES:
-            (dst / filename).write_bytes(zf.read(filename))
+    # 1. Verificar que exista el respaldo.
+    if not src_zip.is_file():
+        raise KeystoreIntegrityError(
+            f"Backup file not found: {src_zip}"
+        )
 
-    _load_keystore_files(dst)
+    # 2. Leer y validar el ZIP antes de crear el destino.
+    try:
+        with zipfile.ZipFile(src_zip, "r") as zf:
+            names = zf.namelist()
+
+            # Cada archivo obligatorio debe aparecer
+            # exactamente una vez.
+            for filename in REQUIRED_FILES:
+                if names.count(filename) != 1:
+                    raise KeystoreIntegrityError(
+                        "Backup archive has missing "
+                        "or duplicate keystore files."
+                    )
+
+            # Recuperar los archivos del respaldo.
+            contents = {
+                filename: zf.read(filename)
+                for filename in REQUIRED_FILES
+            }
+
+    except (zipfile.BadZipFile, EOFError,
+            RuntimeError, OSError) as exc:
+        raise KeystoreIntegrityError(
+            "Corrupted or invalid backup ZIP."
+        ) from exc
+
+    # 3. No sobrescribir un Keystore existente.
+    if dst.exists() or dst.is_symlink():
+        raise FileExistsError(
+            f"Destination already exists: {dst}"
+        )
+
+    # 4. Crear exclusivamente el directorio.
+    dst.mkdir(
+        parents=True,
+        exist_ok=False,
+        mode=0o700,
+    )
+
+    try:
+        if os.name == "posix":
+            dst.chmod(0o700)
+
+        # 5. Escribir cada archivo con permisos 0600.
+        for filename, data in contents.items():
+            file_path = dst / filename
+
+            fd = os.open(
+                file_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+
+            with os.fdopen(fd, "wb") as f:
+                if os.name == "posix":
+                    os.fchmod(f.fileno(), 0o600)
+
+                f.write(data)
+
+        # 6. Validar la estructura restaurada.
+        _load_keystore_files(dst)
+
+    except Exception:
+        # 7. No dejar un Keystore incompleto.
+        shutil.rmtree(dst, ignore_errors=True)
+        raise
+
     return dst
 
 
