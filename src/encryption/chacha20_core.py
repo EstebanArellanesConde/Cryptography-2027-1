@@ -65,6 +65,9 @@ def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     return json.dumps(container, indent=2).encode('utf-8'), key
 
 def encrypt_file(input_path: str, output_path: str) -> bytes:
+    # Se verifica que el archivo no supere el límite de 256 MiB.
+    if os.path.getsize(input_path) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # Se lee todo el contenido del archivo original en modo binario ('rb').
     with open(input_path, 'rb') as f:
         plaintext = f.read()
