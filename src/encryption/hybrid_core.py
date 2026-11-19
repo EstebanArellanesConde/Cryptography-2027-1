@@ -259,59 +259,124 @@ def encrypt_hybrid(
 
 def validate_container(container: dict) -> None:
     """
-    Comprueba la estructura obligatoria del contenedor
-    y evita destinatarios duplicados.
+    Valida la estructura obligatoria del contenedor D3.
+
+    Comprueba:
+    - Campos requeridos.
+    - Tipos de datos.
+    - Numero minimo de destinatarios.
+    - Identificadores de clave validos y sin duplicados.
+    - Base64 y longitud de todas las claves protegidas.
+
+    Esta validacion es estructural, no sustituye
+    la autenticacion criptografica.
     """
 
+    # 1. Verificar que el contenedor sea un diccionario.
     if not isinstance(container, dict):
-        raise ValueError("El contenedor debe ser un objeto JSON.")
+        raise ValueError(
+            "El contenedor debe ser un objeto JSON."
+        )
 
+    # 2. Comprobar exactamente los campos requeridos.
     required_fields = {
-        "header", "recipients", "nonce", "ciphertext", "tag"
+        "header",
+        "recipients",
+        "nonce",
+        "ciphertext",
+        "tag",
     }
 
     if set(container.keys()) != required_fields:
-        raise ValueError("Campos del contenedor invalidos o incompletos.")
+        raise ValueError(
+            "Campos del contenedor invalidos o incompletos."
+        )
 
+    # 3. Validar la estructura del encabezado.
     if not isinstance(container["header"], dict):
         raise ValueError("Encabezado invalido.")
 
+    # 4. Comprobar la lista de destinatarios.
     entries = container["recipients"]
 
     if not isinstance(entries, list) or len(entries) < 2:
-        raise ValueError("Lista de destinatarios invalida.")
+        raise ValueError(
+            "Lista de destinatarios invalida."
+        )
 
+    # 5. Verificar cada destinatario.
     seen_ids = set()
 
     for entry in entries:
+
         if not isinstance(entry, dict):
-            raise ValueError("Entrada de destinatario invalida.")
+            raise ValueError(
+                "Entrada de destinatario invalida."
+            )
 
         if set(entry.keys()) != {"key_id", "encrypted_key"}:
-            raise ValueError("Campos de destinatario invalidos.")
+            raise ValueError(
+                "Campos de destinatario invalidos."
+            )
 
         key_id = entry["key_id"]
         encrypted_key = entry["encrypted_key"]
 
+        # 6. Validar el identificador de clave.
         if not isinstance(key_id, str):
-            raise ValueError("Identificador de clave invalido.")
+            raise ValueError(
+                "Identificador de clave invalido."
+            )
 
         if len(key_id) != 64 or any(
             c not in "0123456789abcdef" for c in key_id
         ):
-            raise ValueError("Identificador SHA-256 invalido.")
+            raise ValueError(
+                "Identificador SHA-256 invalido."
+            )
 
-        if not isinstance(encrypted_key, str):
-            raise ValueError("Clave cifrada invalida.")
-
+        # 7. Rechazar identificadores duplicados.
         if key_id in seen_ids:
-            raise ValueError("Identificadores de destinatarios duplicados.")
+            raise ValueError(
+                "Identificadores de destinatarios duplicados."
+            )
 
         seen_ids.add(key_id)
 
+        # 8. Verificar tipo de la clave protegida.
+        if not isinstance(encrypted_key, str):
+            raise ValueError(
+                "Clave cifrada invalida."
+            )
+
+        # 9. Comprobar codificacion Base64.
+        try:
+            decoded_key = b64decode(
+                encrypted_key,
+                validate=True,
+            )
+        except (Base64Error, ValueError) as error:
+            raise ValueError(
+                "Clave protegida con Base64 invalido."
+            ) from error
+
+        # 10. Comprobar longitud de clave protegida.
+        # X25519 publica efimera: 32 bytes
+        # Nonce: 12 bytes
+        # Clave simetrica cifrada + tag: 48 bytes
+        expected_length = 32 + 12 + 48
+
+        if len(decoded_key) != expected_length:
+            raise ValueError(
+                "Clave protegida con longitud invalida."
+            )
+
+    # 11. Comprobar los tipos de los campos cifrados.
     for field in ("nonce", "ciphertext", "tag"):
         if not isinstance(container[field], str):
-            raise ValueError(f"Campo {field} invalido.")
+            raise ValueError(
+                f"Campo {field} invalido."
+            )
 
 
 # ============================================================
