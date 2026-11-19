@@ -109,34 +109,53 @@ The two trust boundaries are crossed when a protected package **leaves** the sen
 
 ```mermaid
 flowchart LR
-    subgraph TA["🟢 TRUSTED — Alice's Local Environment"]
-        A1["Alice (Sender)"] --> A2["Vault Application"]
-        A2 --> A3["Crypto Engine\n(Encryption + Signing)"]
-        A4["Local Key Store\nAlice Private Key"] --> A3
-        A5["Alice Public Key"] -.-> A2
-        A3 --> A6["Encrypted File\nContainer"]
+    subgraph TA["TRUSTED - Alice's Local Environment"]
+        A1["Alice - Sender"]
+        A2["Encrypt File - ChaCha20-Poly1305"]
+        A3["Protect File Key - X25519 + HKDF-SHA256"]
+        A4["Sign Container - Ed25519"]
+        A5["Alice Signing Key - Protected Local Keystore D6"]
+        A6["Authorized Recipients' X25519 Public Keys"]
+
+        A1 --> A2
+        A2 --> A3
+        A6 -.-> A3
+        A3 --> A4
+        A5 -.-> A4
     end
 
-    subgraph U["🔴 UNTRUSTED — Transfer / Storage"]
-        U1["Shared / Remote Storage"]
+    subgraph U["UNTRUSTED - Storage / Transfer"]
+        U1["Encrypted and Signed Container"]
     end
 
-    subgraph TB["🟢 TRUSTED — Bob's Local Environment"]
-        B6["Unverified\nPackage Input"] --> B2["Vault Application"]
-        B2 --> B3["Crypto Engine\n(Verification + Decryption)"]
-        B4["Local Key Store\nBob Private Key"] --> B3
-        B5["Bob Public Key"] -.-> B2
-        B3 --> B7["Recovered Document"]
-        B7 --> B1["Bob (Recipient)"]
+    subgraph TB["TRUSTED - Bob's Local Environment"]
+        B1["Received Untrusted Container"]
+        B2["Validate Structure and Verify Signature"]
+        B3["Verify Recipient and Recover File Key"]
+        B4["Authenticate and Decrypt - ChaCha20-Poly1305"]
+        B5["Recovered Document"]
+        B6["Trusted Alice Ed25519 Public Key"]
+        B7["Bob X25519 Private Key - Protected Local Keystore D6"]
+
+        B1 --> B2
+        B6 -.-> B2
+        B2 -->|"Valid signature"| B3
+        B7 -.-> B3
+        B3 --> B4
+        B4 --> B5
     end
 
-    A6 -- "Upload" --> U1
-    U1 -- "Download (hostile input)" --> B6
+    A4 -->|"Protected package"| U1
+    U1 -->|"Untrusted input"| B1
 
-    style TA fill:#e6f4ea,stroke:#2e7d32
-    style TB fill:#e6f4ea,stroke:#2e7d32
-    style U fill:#fdecea,stroke:#c62828
+    style TA fill:#e6f4ea,stroke:#2e7d32,color:#1b1b1b
+    style TB fill:#e6f4ea,stroke:#2e7d32,color:#1b1b1b
+    style U fill:#fdecea,stroke:#c62828,color:#1b1b1b 
 ```
+
+**Security limitation — Replay attacks**
+
+The system verifies signatures, recipient authorization, and authenticated encryption before releasing plaintext. However, these mechanisms do not independently prevent replay attacks. An attacker may resend a previously valid encrypted container. Replay protection is outside the current implementation scope.
 
 **Legend**
 - 🟢 Green zones = trusted (application logic, crypto engine, private keys).
@@ -154,7 +173,8 @@ flowchart LR
 | Private keys | Never leave their corresponding local key store |
 | Public keys | May be distributed externally, but their authenticity must be established before they are trusted |
 
-The exact algorithms are intentionally not fixed at the architecture stage — see [Defined Tools To Use](#8-defined-tools-to-use) for the implementation direction already selected by the team.
+
+The implemented cryptographic mechanisms are ChaCha20-Poly1305 for file encryption, X25519 and HKDF-SHA256 for recipient key protection, Ed25519 for digital signatures, and Argon2id with AES-256-GCM for local private-key storage.
 
 ---
 
@@ -280,11 +300,13 @@ The implementation will rely on established, well-reviewed cryptographic librari
 |---|---|---|
 | Programming Language | Python 3.10+ | Mature ecosystem, native byte/bitwise handling, no manual memory management overhead |
 | Cryptographic Library | PyCA `cryptography` (hazmat layer) | Industry-standard, audited primitives |
-| Hash Functions | SHA-256, SHA-512 | Integrity verification, digital signatures, digests |
-| KDF | PBKDF2-HMAC-SHA256 or HKDF | Deriving keys from passwords / existing key material |
-| Symmetric Encryption | AES-256-GCM | Authenticated encryption — confidentiality + integrity in one primitive |
-| Asymmetric Cryptography | RSA-2048/4096 or Ed25519 / SECP256R1 | Key exchange, digital signatures, entity authentication |
-| API Framework | FastAPI | Structured endpoints, Pydantic validation, auto-generated OpenAPI docs |
+
+| Hash Functions | SHA-256 | Public-key identifiers and cryptographic digests |
+| KDF | HKDF-SHA256 and Argon2id | File-key derivation and password-based keystore protection |
+| Symmetric Encryption | ChaCha20-Poly1305 and AES-256-GCM | Authenticated file encryption and private-key protection in D6 |
+| Asymmetric Cryptography | X25519 and Ed25519 | Elliptic-curve key agreement and digital signatures |
+| Execution Environment | Local Python modules and demonstrations | No web API or network service is implemented |
+
 
 ### 8.1 Randomness Requirements
 
@@ -345,14 +367,17 @@ The encrypted container includes the nonce, ciphertext, authentication tag, and 
 
 D3 extends the Secure Digital Document Vault to support secure file sharing with multiple authorized recipients using hybrid encryption.
 
-The file is encrypted only once using ChaCha20-Poly1305. The symmetric file key is then encrypted separately for each recipient using RSA-OAEP with SHA-256.
 
-Each recipient uses their RSA private key to recover the symmetric file key and decrypt the file.
+The file is encrypted only once using ChaCha20-Poly1305. The symmetric file key is then protected separately for each authorized recipient using X25519, HKDF-SHA256, and ChaCha20-Poly1305.
+
+
+Each authorized recipient uses their X25519 private key to recover the symmetric file key and decrypt the document.
+
 
 ## Main Features
 
-- Support for at least two authorized recipients.
-- Individual RSA-OAEP encryption of the symmetric file key.
+- Support for at least two authorized recipients. 
+- Individual protection of the symmetric file key for each recipient using X25519, HKDF-SHA256, and ChaCha20-Poly1305.
 - Deterministic recipient identification using SHA-256 public-key fingerprints.
 - JSON container containing the recipient list, encrypted keys, nonce, ciphertext, and authentication tag.
 - AAD protection for the public header, recipient list, and algorithm identifiers.
