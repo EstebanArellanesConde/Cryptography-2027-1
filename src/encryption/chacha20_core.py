@@ -204,22 +204,6 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
         aad,
     )
 
-    # Se revierte la conversión Base64 para recuperar los bytes originales.
-    nonce = b64decode(container["nonce"])
-    
-    # Se vuelve a unir el texto cifrado y el tag de autenticación porque así lo requiere la librería para desencriptar.
-    ct_with_tag = b64decode(container["ciphertext"]) + b64decode(container["tag"])
-    
-    # Se reconstruye el AAD exactamente como estaba. (Se usa sort_keys=True para garantizar el mismo orden).
-    aad = json.dumps(container["header"], sort_keys=True).encode('utf-8')
-
-    # Se configura el desencriptador con la llave proporcionada.
-    chacha = ChaCha20Poly1305(key)
-    
-    # Se desencripta. Si un solo bit del archivo, del tag, o del header (AAD) fue modificado por un atacante, 
-    # esta línea fallará automáticamente lanzando un error "InvalidTag".
-    payload = chacha.decrypt(nonce, ct_with_tag, aad)
-
     # 9. Validar la longitud de los metadatos privados.
     if len(payload) < 4:
         raise ValueError(
