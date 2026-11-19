@@ -8,7 +8,7 @@ from cryptography.exceptions import InvalidTag
 
 from encryption.chacha20_core import encrypt_bytes, decrypt_file
 
-@pytest.mark.parametrize("field", ["nonce"])
+@pytest.mark.parametrize("field", ["nonce", "tag"])
 def test_modified_nonce_or_tag_is_rejected(tmp_path, field):
     """
     Comprueba que modificar el nonce o el tag
