@@ -55,3 +55,16 @@ def test_decrypt_file_rejects_oversized_output(
         )
 
     assert not destination.exists()
+
+
+def test_encrypt_bytes_accepts_file_at_limit(monkeypatch):
+    """Un archivo exactamente en el limite debe aceptarse."""
+    monkeypatch.setattr(core, "MAX_FILE_SIZE", 16)
+
+    container, key = core.encrypt_bytes(
+        b"A" * 16,
+        "documento.txt",
+    )
+
+    assert isinstance(container, bytes)
+    assert len(key) == 32
