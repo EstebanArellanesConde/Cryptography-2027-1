@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
+#Límite máximo de archivo permitido por D2: 256MiB
+MAX_FILE_SIZE = 256 * 1024 * 1024  # 256 MiB
+
 def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
     # 1. Se genera una llave de 32 bytes y un nonce de 12 bytes de forma aleatoria y segura. 
     # El nonce nunca debe repetirse con la misma llave.
