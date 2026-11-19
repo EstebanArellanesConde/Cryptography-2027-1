@@ -4,6 +4,8 @@
 
 This module selects **ChaCha20-Poly1305** through PyCA `cryptography`. It is an authenticated-encryption-with-associated-data (AEAD) construction: it encrypts the plaintext and verifies authenticity/integrity when decrypting. The implementation does not implement ChaCha20 or Poly1305 manually.
 
+> This D2 implementation uses ChaCha20-Poly1305, not AES-GCM. Both provide authenticated encryption, but ChaCha20-Poly1305 is the algorithm implemented in this module.
+
 - Key: 256 bits (32 bytes), freshly generated per file using the library's key-generation function.
 - Nonce: 96 bits (12 bytes), freshly generated using the operating system CSPRNG for each encryption.
 - Tag: 128 bits (16 bytes), generated and verified by the AEAD implementation.
@@ -49,8 +51,7 @@ pytest -q
 ## Example
 
 ```python
-from encryption.aes_gcm_core import encrypt_file, decrypt_file
-
+from encryption.chacha20_core import encrypt_file, decrypt_file
 key = encrypt_file("input.pdf", "input.pdf.svlt")
 # Save `key` using your approved secure key-management mechanism.
 metadata = decrypt_file("input.pdf.svlt", "recovered.pdf", key)
