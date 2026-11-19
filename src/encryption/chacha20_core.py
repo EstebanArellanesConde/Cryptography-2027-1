@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timezone
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+from binascii import Error as Base64Error
 
 #Límite máximo de archivo permitido por D2: 256MiB
 MAX_FILE_SIZE = 256 * 1024 * 1024  # 256 MiB
