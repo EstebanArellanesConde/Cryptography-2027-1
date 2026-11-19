@@ -38,10 +38,13 @@ def test_reject_malformed_container(tmp_path, scenario):
     else:
         if scenario == "missing_nonce":
             del container["nonce"]
-            
+
         elif scenario == "wrong_ciphertext_type":
             container["ciphertext"] = 12345
 
+        elif scenario == "invalid_base64":
+            container["nonce"] = "%%%"
+            
         modified_bytes = json.dumps(
             container
         ).encode("utf-8")
