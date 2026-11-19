@@ -8,6 +8,9 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 MAX_FILE_SIZE = 256 * 1024 * 1024  # 256 MiB
 
 def encrypt_bytes(plaintext: bytes, filename: str) -> tuple[bytes, bytes]:
+    # Se verifica que el tamaño del archivo no supere el límite de 256 MiB.
+    if len(plaintext) > MAX_FILE_SIZE:
+        raise ValueError("El archivo supera el limite de 256 MiB.")
     # 1. Se genera una llave de 32 bytes y un nonce de 12 bytes de forma aleatoria y segura. 
     # El nonce nunca debe repetirse con la misma llave.
     key = ChaCha20Poly1305.generate_key()
