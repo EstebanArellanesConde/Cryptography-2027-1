@@ -1,6 +1,6 @@
 """D2: pruebas de proteccion contra sobrescritura."""
 
-import pytestgit add tests/test_d2_file_safety.py
+import pytest
 from encryption.chacha20_core import encrypt_file, decrypt_file
 
 def test_encrypt_file_does_not_overwrite(tmp_path):
