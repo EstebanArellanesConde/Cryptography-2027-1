@@ -18,7 +18,7 @@ from base64 import b64decode, b64encode
 import pytest
 
 from encryption import signed_hybrid
-from encryption.hybrid_core import generate_ecies_keypair
+from encryption.hybrid_core import generate_keypair
 from encryption.signed_hybrid import decrypt_signed_hybrid, encrypt_signed_hybrid
 from signatures.signature_core import generate_signing_keypair
 
@@ -26,9 +26,9 @@ from signatures.signature_core import generate_signing_keypair
 @pytest.fixture
 def scenario():
     """Generate fresh, unrelated encryption/signing keys for each test."""
-    alice_private, alice_public = generate_ecies_keypair()
-    bob_private, bob_public = generate_ecies_keypair()
-    unauthorized_private, _ = generate_ecies_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
+    unauthorized_private, _ = generate_keypair()
     signer_private, signer_public = generate_signing_keypair()
     _, unrelated_signer_public = generate_signing_keypair()
 

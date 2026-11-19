@@ -85,7 +85,7 @@ def sign_hybrid_container(
     container = _read_container(unsigned_container_bytes)
     validate_container(container)  # D3 exige exactamente sus cinco campos.
     if container["header"] != HEADER:
-        raise ValueError("D5 requiere el contenedor ECIES P-256 de D3.")
+        raise ValueError("D5 requiere un contenedor D3 basado en X25519.")
 
     container["signer_id"] = signer_key_id(signing_private_key.public_key())
     digest = hash_signed_payload(container)  # Módulo de Axel.
