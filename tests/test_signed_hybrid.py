@@ -7,7 +7,7 @@ from base64 import b64decode, b64encode
 import pytest
 
 from encryption import signed_hybrid
-from encryption.hybrid_core import encrypt_hybrid, generate_ecies_keypair
+from encryption.hybrid_core import encrypt_hybrid, generate_keypair
 from encryption.signed_hybrid import (
     decrypt_signed_hybrid,
     encrypt_signed_hybrid,
@@ -19,9 +19,9 @@ from signatures.signature_core import generate_signing_keypair, signer_key_id
 
 @pytest.fixture
 def actors():
-    alice_priv, alice_pub = generate_ecies_keypair()
-    bob_priv, bob_pub = generate_ecies_keypair()
-    charlie_priv, _ = generate_ecies_keypair()
+    alice_priv, alice_pub = generate_keypair()
+    bob_priv, bob_pub = generate_keypair()
+    charlie_priv, _ = generate_keypair()
     signing_priv, signing_pub = generate_signing_keypair()
     _, wrong_signing_pub = generate_signing_keypair()
     return {

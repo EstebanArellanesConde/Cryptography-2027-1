@@ -21,6 +21,13 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, serialization
 
+# Encabezado oficial de D3: cifrado hibrido con X25519.
+HEADER = {
+    "format": "SecureVault",
+    "version": "3.0",
+    "algorithm": "ChaCha20-Poly1305",
+    "key_encryption": "X25519-HKDF-SHA256-ChaCha20Poly1305"
+}
 
 # ============================================================
 # REQUISITO 6: SECURE PUBLIC KEY USAGE
@@ -220,13 +227,8 @@ def encrypt_hybrid(
             ).decode("utf-8")
         })
 
-    # 5. Crear encabezado publico.
-    header = {
-        "format": "SecureVault",
-        "version": "3.0",
-        "algorithm": "ChaCha20-Poly1305",
-        "key_encryption": "X25519-HKDF-SHA256-ChaCha20Poly1305"
-    }
+    # 5. Crear encabezado publico usando el formato oficial de D3.
+    header = HEADER.copy()
 
     # 6. Autenticar metadatos y destinatarios con AAD.
     aad = build_aad(header, recipient_entries)
@@ -337,12 +339,8 @@ def decrypt_hybrid(
     validate_container(container)
 
     # 2. Verificar version y algoritmos.
-    expected_header = {
-        "format": "SecureVault",
-        "version": "3.0",
-        "algorithm": "ChaCha20-Poly1305",
-        "key_encryption": "X25519-HKDF-SHA256-ChaCha20Poly1305"
-    }
+    # Verificar que el contenedor utilice el formato oficial.
+    expected_header = HEADER
 
     if container["header"] != expected_header:
         raise ValueError("Formato o algoritmos no compatibles.")
