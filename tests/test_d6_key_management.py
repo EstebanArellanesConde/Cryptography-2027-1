@@ -1,10 +1,13 @@
 """D6 automated security tests for Key Management System."""
 
+import os
+import stat
 import base64
 import json
 import shutil
 
 import pytest
+import src.key_management.keystore as keystore_module
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
@@ -203,3 +206,143 @@ def test_create_keystore_prevents_overwrite(tmp_path):
     # Verificar que los archivos originales no cambiaron.
     for name in filenames:
         assert (keystore_dir / name).read_bytes() == original_files[name]
+
+
+def test_keystore_restrictive_file_permissions(tmp_path):
+    """
+    D6: verifica que el directorio y los archivos
+    del Keystore tengan permisos restrictivos.
+
+    Directorio: 0700
+    Archivos: 0600
+    """
+
+    keystore_dir = tmp_path / "secure_keystore"
+
+    # Simular una configuracion comun de permisos Linux.
+    # Restaurar siempre la umask original.
+    original_umask = os.umask(0o022)
+
+    try:
+        create_keystore(
+            keystore_dir,
+            usage="encryption",
+            password="PasswordSegura123!",
+        )
+    finally:
+        os.umask(original_umask)
+
+    # 1. Verificar permisos del directorio.
+    directory_mode = stat.S_IMODE(
+        keystore_dir.stat().st_mode
+    )
+
+    assert directory_mode == 0o700, (
+        f"Permisos del directorio incorrectos: "
+        f"{oct(directory_mode)}"
+    )
+
+    # 2. Verificar permisos de los archivos.
+    filenames = (
+        "encrypted_private_key",
+        "salt",
+        "kdf_parameters",
+        "metadata",
+    )
+
+    for filename in filenames:
+        file_path = keystore_dir / filename
+
+        assert file_path.is_file()
+
+        file_mode = stat.S_IMODE(
+            file_path.stat().st_mode
+        )
+
+        assert file_mode == 0o600, (
+            f"{filename} tiene permisos inseguros: "
+            f"{oct(file_mode)}"
+        )
+
+@pytest.mark.parametrize(
+    "parameter, invalid_value",
+    [
+        ("memory_cost", 1_000_000_000),
+        ("memory_cost", -1),
+        ("iterations", 0),
+        ("iterations", 1_000_000),
+        ("lanes", 0),
+        ("lanes", 1_000_000),
+        ("length", 1_000_000),
+    ],
+)
+def test_reject_unsafe_argon2id_parameters(
+    monkeypatch,
+    parameter,
+    invalid_value,
+):
+    """
+    D6: comprobar que los parametros peligrosos
+    sean rechazados antes de ejecutar Argon2id.
+    """
+
+    # 1. Partir de la configuracion valida del proyecto.
+    params = dict(
+        keystore_module.DEFAULT_KDF_PARAMS
+    )
+
+    # 2. Simular un parametro manipulado.
+    params[parameter] = invalid_value
+
+    # 3. Impedir que se ejecute Argon2id realmente.
+    # Esto evita consumir memoria excesiva en las pruebas.
+    class ForbiddenArgon2id:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "Argon2id fue invocado antes "
+                "de validar sus parametros."
+            )
+
+    monkeypatch.setattr(
+        keystore_module,
+        "Argon2id",
+        ForbiddenArgon2id,
+    )
+
+    # 4. La validacion debe rechazar el parametro.
+    with pytest.raises(
+        keystore_module.KeystoreIntegrityError
+    ):
+        keystore_module._derive_kek(
+            "PasswordSegura123!",
+            b"\x01" * 16,
+            params,
+        )
+
+def test_restore_rejects_corrupted_backup(tmp_path):
+    """
+    D6: comprobar que un respaldo ZIP corrupto
+    sea rechazado de forma controlada.
+
+    La restauracion no debe crear un Keystore
+    incompleto.
+    """
+
+    # 1. Simular un archivo de respaldo corrupto.
+    backup_path = tmp_path / "corrupted_backup.zip"
+    backup_path.write_bytes(
+        b"Este contenido no es un archivo ZIP valido"
+    )
+
+    # 2. Definir el destino de restauracion.
+    restored_dir = tmp_path / "restored_keystore"
+
+    # 3. La restauracion debe rechazar el respaldo.
+    with pytest.raises(KeystoreIntegrityError):
+        restore_keystore(
+            backup_path,
+            restored_dir,
+        )
+
+    # 4. No deben quedar directorios incompletos.
+    assert not restored_dir.exists()
