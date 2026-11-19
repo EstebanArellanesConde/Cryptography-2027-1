@@ -150,7 +150,7 @@ flowchart LR
 
     style TA fill:#e6f4ea,stroke:#2e7d32,color:#1b1b1b
     style TB fill:#e6f4ea,stroke:#2e7d32,color:#1b1b1b
-    style U fill:#fdecea,stroke:#c62828,color:#1b1b1b 
+    style U fill:#fdecea,stroke:#c62828,color:#1b1b1b
 ```
 
 **Security limitation — Replay attacks**
@@ -376,7 +376,7 @@ Each authorized recipient uses their X25519 private key to recover the symmetric
 
 ## Main Features
 
-- Support for at least two authorized recipients. 
+- Support for at least two authorized recipients.
 - Individual protection of the symmetric file key for each recipient using X25519, HKDF-SHA256, and ChaCha20-Poly1305.
 - Deterministic recipient identification using SHA-256 public-key fingerprints.
 - JSON container containing the recipient list, encrypted keys, nonce, ciphertext, and authentication tag.
