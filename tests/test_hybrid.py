@@ -13,7 +13,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from encryption.hybrid_core import (
-    generate_rsa_keypair,
+    generate_keypair,
     get_key_id,
     encrypt_hybrid,
     decrypt_hybrid,
@@ -33,8 +33,8 @@ def test_two_authorized_recipients():
     """
 
     # Generar claves independientes.
-    alice_private, alice_public = generate_rsa_keypair()
-    bob_private, bob_public = generate_rsa_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
 
     original_data = b"Archivo secreto para Alice y Bob"
 
@@ -73,9 +73,9 @@ def test_unauthorized_recipient_fails():
     autorizados y no debe recuperar el archivo.
     """
 
-    alice_private, alice_public = generate_rsa_keypair()
-    bob_private, bob_public = generate_rsa_keypair()
-    charlie_private, charlie_public = generate_rsa_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
+    charlie_private, charlie_public = generate_keypair()
 
     # Solamente Alice y Bob estan autorizados.
     container = encrypt_hybrid(
@@ -103,8 +103,8 @@ def test_tampered_recipient_list_fails():
     el AAD incluso cuando Alice utiliza su clave correcta.
     """
 
-    alice_private, alice_public = generate_rsa_keypair()
-    bob_private, bob_public = generate_rsa_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
 
     container_bytes = encrypt_hybrid(
         b"Documento confidencial",
@@ -145,11 +145,11 @@ def test_wrong_private_key_fails():
     cifrada especificamente para Alice.
     """
 
-    alice_private, alice_public = generate_rsa_keypair()
-    bob_private, bob_public = generate_rsa_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
 
     container_bytes = encrypt_hybrid(
-        b"Documento protegido con RSA-OAEP",
+        b"Documento protegido con ECIES",
         "documento.txt",
         [alice_public, bob_public]
     )
@@ -186,9 +186,9 @@ def test_removed_recipient_fails():
     """
 
     # Tres destinatarios para mantener dos tras eliminar uno.
-    alice_private, alice_public = generate_rsa_keypair()
-    bob_private, bob_public = generate_rsa_keypair()
-    charlie_private, charlie_public = generate_rsa_keypair()
+    alice_private, alice_public = generate_keypair()
+    bob_private, bob_public = generate_keypair()
+    charlie_private, charlie_public = generate_keypair()
 
     container_bytes = encrypt_hybrid(
         b"Archivo compartido con tres destinatarios",

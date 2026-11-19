@@ -1,10 +1,10 @@
-
+﻿
 """
 D3 - Hybrid Encryption
 Secure Digital Document Vault
 
 Cifrado hibrido para multiples destinatarios.
-ChaCha20-Poly1305 + RSA-OAEP con SHA-256.
+ChaCha20-Poly1305 + ECIES (X25519, HKDF-SHA256).
 """
 
 import os
@@ -16,30 +16,41 @@ from datetime import datetime, timezone
 from binascii import Error as Base64Error
 
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.asymmetric import x25519
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, serialization
 
+# Encabezado oficial de D3: cifrado hibrido con X25519.
+HEADER = {
+    "format": "SecureVault",
+    "version": "3.0",
+    "algorithm": "ChaCha20-Poly1305",
+    "key_encryption": "X25519-HKDF-SHA256-ChaCha20Poly1305"
+}
 
 # ============================================================
 # REQUISITO 6: SECURE PUBLIC KEY USAGE
-# Generacion de claves RSA para cada destinatario.
+# Generacion de claves X25519 para cada destinatario.
 # ============================================================
 
-def generate_rsa_keypair():
+def generate_keypair():
     """
-    Genera un par de claves RSA de 3072 bits.
+    Genera un par de claves X25519 (curva eliptica).
     Cada destinatario conserva su clave privada
     y comparte su clave publica.
     """
 
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=3072
+    private_key = x25519.X25519PrivateKey.generate()
+
+    return private_key, private_key.public_key()
+
+
+def _raw_public(public_key) -> bytes:
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
     )
-
-    public_key = private_key.public_key()
-
-    return private_key, public_key
 
 
 # ============================================================
@@ -49,59 +60,76 @@ def generate_rsa_keypair():
 
 def get_key_id(public_key) -> str:
     """
-    Calcula el identificador de una clave publica RSA
-    utilizando su representacion DER y SHA-256.
+    Calcula el identificador de una clave publica
+    (SHA-256 de sus 32 bytes en formato raw).
     """
 
-    public_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-    return hashlib.sha256(public_bytes).hexdigest()
+    return hashlib.sha256(_raw_public(public_key)).hexdigest()
 
 
 # ============================================================
 # REQUISITO 6: SECURE PUBLIC KEY USAGE
-# RSA-OAEP cifra solamente la clave simetrica.
+# ECIES: X25519 efimero + HKDF-SHA256 + ChaCha20-Poly1305.
+# Solo se protege la clave simetrica del archivo.
 # ============================================================
+
+def _derive_kek(shared_secret: bytes, eph_pub: bytes,
+                recipient_pub: bytes) -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"SecureVault-key-wrap" + eph_pub + recipient_pub
+    ).derive(shared_secret)
+
 
 def encrypt_file_key(file_key: bytes, public_key) -> bytes:
     """
-    Protege la clave simetrica usando la clave publica
-    RSA de un destinatario autorizado.
+    Protege la clave simetrica para un destinatario.
+    Resultado: clave publica efimera (32) || nonce (12) || cifrado (48).
     """
 
     if len(file_key) != 32:
         raise ValueError("La clave simetrica debe tener 32 bytes.")
 
-    return public_key.encrypt(
-        file_key,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
+    eph_private = x25519.X25519PrivateKey.generate()
+    eph_pub = _raw_public(eph_private.public_key())
+    recipient_pub = _raw_public(public_key)
+
+    kek = _derive_kek(
+        eph_private.exchange(public_key), eph_pub, recipient_pub
     )
+
+    nonce = os.urandom(12)
+    wrapped = ChaCha20Poly1305(kek).encrypt(nonce, file_key, recipient_pub)
+
+    return eph_pub + nonce + wrapped
 
 
 def decrypt_file_key(encrypted_key: bytes, private_key) -> bytes:
     """
-    Recupera la clave simetrica mediante RSA-OAEP
-    usando la clave privada correspondiente.
+    Recupera la clave simetrica con la clave privada
+    X25519 correspondiente.
     """
 
-    file_key = private_key.decrypt(
-        encrypted_key,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
+    if len(encrypted_key) != 32 + 12 + 48:
+        raise ValueError("Clave cifrada con longitud invalida.")
 
-    if len(file_key) != 32:
-        raise ValueError("La clave recuperada debe tener 32 bytes.")
+    eph_pub = encrypted_key[:32]
+    nonce = encrypted_key[32:44]
+    wrapped = encrypted_key[44:]
+    recipient_pub = _raw_public(private_key.public_key())
+
+    try:
+        shared = private_key.exchange(
+            x25519.X25519PublicKey.from_public_bytes(eph_pub)
+        )
+        kek = _derive_kek(shared, eph_pub, recipient_pub)
+        file_key = ChaCha20Poly1305(kek).decrypt(
+            nonce, wrapped, recipient_pub
+        )
+    except (InvalidTag, ValueError) as error:
+        raise ValueError("No se pudo recuperar la clave.") from error
 
     return file_key
 
@@ -149,7 +177,7 @@ def encrypt_hybrid(
     ChaCha20-Poly1305.
 
     La misma clave simetrica se protege para cada
-    destinatario usando RSA-OAEP.
+    destinatario usando ECIES (X25519).
 
     Devuelve un contenedor JSON en bytes.
     """
@@ -199,13 +227,8 @@ def encrypt_hybrid(
             ).decode("utf-8")
         })
 
-    # 5. Crear encabezado publico.
-    header = {
-        "format": "SecureVault",
-        "version": "2.0",
-        "algorithm": "ChaCha20-Poly1305",
-        "key_encryption": "RSA-OAEP-SHA256"
-    }
+    # 5. Crear encabezado publico usando el formato oficial de D3.
+    header = HEADER.copy()
 
     # 6. Autenticar metadatos y destinatarios con AAD.
     aad = build_aad(header, recipient_entries)
@@ -316,12 +339,8 @@ def decrypt_hybrid(
     validate_container(container)
 
     # 2. Verificar version y algoritmos.
-    expected_header = {
-        "format": "SecureVault",
-        "version": "2.0",
-        "algorithm": "ChaCha20-Poly1305",
-        "key_encryption": "RSA-OAEP-SHA256"
-    }
+    # Verificar que el contenedor utilice el formato oficial.
+    expected_header = HEADER
 
     if container["header"] != expected_header:
         raise ValueError("Formato o algoritmos no compatibles.")
