@@ -220,22 +220,51 @@ def decrypt_file(input_path: str, output_path: str, key: bytes) -> dict:
     # esta línea fallará automáticamente lanzando un error "InvalidTag".
     payload = chacha.decrypt(nonce, ct_with_tag, aad)
 
-    # Se extraen los primeros 4 bytes para saber de qué tamaño son los metadatos.
-    meta_len = int.from_bytes(payload[:4], 'big')
-    
-    # Se corta el payload usando ese tamaño para recuperar el JSON de metadatos y convertirlo a diccionario.
-    metadata = json.loads(payload[4:4+meta_len].decode('utf-8'))
-    
-    # El resto de la información es el archivo original intacto.
-    plaintext = payload[4+meta_len:]
+    # 9. Validar la longitud de los metadatos privados.
+    if len(payload) < 4:
+        raise ValueError(
+            "Contenedor D2 invalido: payload incompleto."
+        )
 
-    # Evitar recuperar archivos mayores al limite permitido.
+    meta_len = int.from_bytes(
+        payload[:4],
+        "big",
+    )
+
+    if meta_len > len(payload) - 4:
+        raise ValueError(
+            "Contenedor D2 invalido: longitud de metadatos."
+        )
+
+    # 10. Recuperar los metadatos privados.
+    try:
+        metadata = json.loads(
+            payload[4:4 + meta_len].decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
+
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "Contenedor D2 invalido: metadatos incorrectos."
+        ) from error
+
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            "Contenedor D2 invalido: metadatos incorrectos."
+        )
+
+    # 11. Recuperar el archivo original.
+    plaintext = payload[4 + meta_len:]
+
+    # 12. Respetar el limite de 256 MiB.
     if len(plaintext) > MAX_FILE_SIZE:
-        raise ValueError("El archivo descifrado supera el limite de 256 MiB.")
-    
-    # Recuperar el archivo sin sobreescribir uno existente.
-    with open(output_path, 'xb') as f:
+        raise ValueError(
+            "El archivo descifrado supera el limite de 256 MiB."
+        )
+
+    # 13. Guardar sin sobrescribir archivos existentes.
+    with open(output_path, "xb") as f:
         f.write(plaintext)
-        
-    # Se devuelven los metadatos ocultos por si el programa los necesita.
+
+    # 14. Devolver los metadatos recuperados.
     return metadata
