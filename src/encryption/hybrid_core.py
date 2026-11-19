@@ -1,4 +1,4 @@
-﻿
+
 """
 D3 - Hybrid Encryption
 Secure Digital Document Vault
@@ -321,6 +321,22 @@ def validate_container(container: dict) -> None:
 # METADATA + AAD INTEGRATION
 # ============================================================
 
+def _reject_duplicate_fields(pairs):
+    """
+    Rechaza campos JSON duplicados para evitar
+    interpretaciones ambiguas del contenedor.
+    """
+    result = {}
+
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Campo JSON duplicado: {key}")
+
+        result[key] = value
+
+    return result
+
+
 def decrypt_hybrid(
     container_bytes: bytes,
     private_key
@@ -334,7 +350,10 @@ def decrypt_hybrid(
     """
 
     # 1. Leer y validar el contenedor.
-    container = json.loads(container_bytes)
+    container = json.loads(
+        container_bytes,
+        object_pairs_hook=_reject_duplicate_fields,
+    )
 
     validate_container(container)
 
