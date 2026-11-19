@@ -11,6 +11,7 @@ import gc
 import getpass
 import json
 import os
+import shutil
 import zipfile
 import tempfile
 from contextlib import contextmanager

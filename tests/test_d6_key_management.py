@@ -318,3 +318,31 @@ def test_reject_unsafe_argon2id_parameters(
             b"\x01" * 16,
             params,
         )
+
+def test_restore_rejects_corrupted_backup(tmp_path):
+    """
+    D6: comprobar que un respaldo ZIP corrupto
+    sea rechazado de forma controlada.
+
+    La restauracion no debe crear un Keystore
+    incompleto.
+    """
+
+    # 1. Simular un archivo de respaldo corrupto.
+    backup_path = tmp_path / "corrupted_backup.zip"
+    backup_path.write_bytes(
+        b"Este contenido no es un archivo ZIP valido"
+    )
+
+    # 2. Definir el destino de restauracion.
+    restored_dir = tmp_path / "restored_keystore"
+
+    # 3. La restauracion debe rechazar el respaldo.
+    with pytest.raises(KeystoreIntegrityError):
+        restore_keystore(
+            backup_path,
+            restored_dir,
+        )
+
+    # 4. No deben quedar directorios incompletos.
+    assert not restored_dir.exists()
