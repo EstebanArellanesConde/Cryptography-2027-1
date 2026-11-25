@@ -1,6 +1,6 @@
 """D6: Key Management System for Secure Digital Document Vault.
 
-Protects P-256 (D3 encryption) and Ed25519 (D5 signing) private keys at rest
+Protects X25519 (D3 encryption) and Ed25519 (D5 signing) private keys at rest
 using Argon2id key derivation and AES-256-GCM authenticated encryption.
 """
 
@@ -631,7 +631,7 @@ def decrypt_file_with_keystore(
     keystore_dir: str | Path,
     password: str | None = None,
 ) -> tuple[bytes, dict]:
-    """Unlock the P-256 encryption key on demand and decrypt a D3 hybrid container."""
+    """Unlock the X25519 encryption key on demand and decrypt a D3 hybrid container."""
     with use_private_key(
         keystore_dir, password=password, expected_usage="encryption"
     ) as private_key:
