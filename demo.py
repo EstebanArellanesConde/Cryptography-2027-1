@@ -1,55 +1,43 @@
-import json
-from src.encryption.hybrid_core import generate_rsa_keypair, encrypt_hybrid, decrypt_hybrid
+"""
+Secure Vault - Demostraciones del proyecto
+D3: Cifrado hibrido con X25519
+D5: Firmas digitales Ed25519
 
-print("\n--- 0. PREPARING KEYS (ALICE, BOB, AND CHARLIE) ---")
-alice_priv, alice_pub = generate_rsa_keypair()
-bob_priv, bob_pub = generate_rsa_keypair()
-charlie_priv, charlie_pub = generate_rsa_keypair() # Charlie will be unauthorized
+NO SE UTILIZA RSA
+"""
 
-print("\n--- 1. VALID ENCRYPTION -> DECRYPTION WORKS ---")
-# Read original file
-with open("message.txt", "rb") as f:
-    plaintext = f.read()
+from demos.demo_alice_bob import main as demo_alice_bob
+from demos.demo_security_failures import main as demo_seguridad
 
-# Encrypt the file authorizing Alice and Bob
-container_bytes = encrypt_hybrid(plaintext, "message.txt", [alice_pub, bob_pub])
-with open("hybrid_package.svlt", "wb") as f:
-    f.write(container_bytes)
-print("[+] File successfully encrypted into 'hybrid_package.svlt'.")
-input("\n[PAUSE] Press Enter to decrypt as Alice...")
 
-# Alice decrypts with her private key
-with open("hybrid_package.svlt", "rb") as f:
-    encrypted_data = f.read()
+def main():
+    print("\n====================================")
+    print("       SECURE VAULT - DEMO")
+    print("====================================")
+    print("1. Cifrado y descifrado: Alice y Bob")
+    print("2. Pruebas de seguridad")
+    print("3. Ejecutar ambas demostraciones")
+    print("0. Salir")
 
-recovered_plaintext, meta = decrypt_hybrid(encrypted_data, alice_priv)
-with open("recovered_alice.txt", "wb") as f:
-    f.write(recovered_plaintext)
-print("[+] Successful decryption for Alice. 'recovered_alice.txt' created.")
-input("\n[PAUSE] Press Enter to demonstrate that Bob can also decrypt...")
+    opcion = input("\nSelecciona una opcion: ")
 
-print("\n--- 2. SHARED FILE -> RECIPIENT CAN DECRYPT ---")
-# Bob decrypts with his private key
-recovered_plaintext_bob, meta_bob = decrypt_hybrid(encrypted_data, bob_priv)
-with open("recovered_bob.txt", "wb") as f:
-    f.write(recovered_plaintext_bob)
-print("[+] Successful decryption for Bob (shared file).")
-input("\n[PAUSE] Press Enter to attempt decryption as Charlie (Unauthorized)...")
+    if opcion == "1":
+        demo_alice_bob()
 
-print("\n--- 3. NON-RECIPIENT CANNOT DECRYPT ---")
-try:
-    # Charlie attempts to decrypt but is not in the recipient list
-    decrypt_hybrid(encrypted_data, charlie_priv)
-except Exception as e:
-    print(f"[!] Access denied for Charlie. Caught error: {type(e).__name__} - {str(e)}")
-input("\n[PAUSE] Go to your editor, change or delete one character from 'ciphertext' in the JSON, save it, and press Enter...")
+    elif opcion == "2":
+        demo_seguridad()
 
-print("\n--- 4. MODIFIED FILE -> DECRYPTION FAILS ---")
-try:
-    # Alice attempts to decrypt a tampered file
-    with open("hybrid_package.svlt", "rb") as f:
-        tampered_data = f.read()
-    decrypt_hybrid(tampered_data, alice_priv)
-except Exception as e:
-    print(f"[!] Tampering detected. Decryption safely aborted. Error: {type(e).__name__}")
-print("\n--- DEMONSTRATION FINISHED ---")
+    elif opcion == "3":
+        demo_alice_bob()
+        print("\n-------------------------------\n")
+        demo_seguridad()
+
+    elif opcion == "0":
+        print("Saliendo de Secure Vault...")
+
+    else:
+        print("Opcion no valida.")
+
+
+if __name__ == "__main__":
+    main()
