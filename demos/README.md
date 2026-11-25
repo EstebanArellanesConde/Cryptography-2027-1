@@ -78,7 +78,7 @@ Run the complete test suite:
 python -m pytest -q
 ```
 
-Verified baseline: 71 tests passed, 6 deprecation warnings.
+Latest verified run (2026-11-25): 103 tests passed.
 
 ## Scope and Limitations
 
