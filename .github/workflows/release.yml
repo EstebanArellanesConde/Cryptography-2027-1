@@ -28,7 +28,7 @@ jobs:
         run: python -m build
 
       - name: Store build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: secure-vault-distributions
           path: dist/*
