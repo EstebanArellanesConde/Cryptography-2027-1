@@ -1,9 +1,38 @@
-# Entorno virtual de Python
+# Python virtual environments
 .venv/
+venv/
 
-# Archivos temporales de Python
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
 
-# Cache de pruebas pytest
+# Test artifacts
 .pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python packaging
+*.egg-info/
+build/
+dist/
+
+# Static analysis
+.ruff_cache/
+.mypy_cache/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# IDE files
+.vscode/
+.idea/
+
+# Local Secure Vault data
+vault_data/
+.secure_vault_demo/
+*.vault
+*.svlt
