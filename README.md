@@ -15,6 +15,14 @@ Repository for Cryptography Coursework 2027-1 (Group 4, Team 6).
 
 ---
 
+[![QA - Tests](https://github.com/EstebanArellanesConde/Cryptography-2027-1/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EstebanArellanesConde/Cryptography-2027-1/actions/workflows/ci.yml)
+
+[![Security](https://github.com/EstebanArellanesConde/Cryptography-2027-1/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/EstebanArellanesConde/Cryptography-2027-1/actions/workflows/security.yml)
+
+![Python](https://img.shields.io/badge/Python-3.14%20tested-blue)
+![Tests](https://img.shields.io/badge/tests-103%20passed-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-83%25-yellowgreen)
+
 # D1 — Architecture & Threat Model
 
 ```
